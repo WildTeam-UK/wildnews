@@ -312,7 +312,8 @@ p{margin-top:0;margin-bottom:1.25em}p:last-child{margin-bottom:0}p+p{margin-top:
 /* Shared WildTeam-style site navigation */
 .site-header,.interior-header{position:sticky;z-index:40;top:0;background:var(--paper)}
 .site-masthead{position:relative;display:flex;align-items:center;gap:32px;min-height:var(--wt-layout-site-header-height,5.875rem);padding:0 max(var(--wt-layout-page-gutter,1.5rem),calc((100vw - var(--wt-layout-content-max-width,77.5rem))/2));background:var(--paper);border-bottom:1px solid var(--rule)}
-.brand{display:inline-flex;align-items:center;flex:0 0 auto;font:var(--font-weight-black) var(--wt-font-size-site-wordmark,clamp(1.5rem,3vw,2.375rem))/1 var(--font-family),sans-serif;letter-spacing:var(--wt-font-tracking-site-wordmark,-.015em);text-transform:uppercase}
+.brand{display:inline-flex;align-items:center;gap:.22em;flex:0 0 auto;font:var(--font-weight-black) var(--wt-font-size-site-wordmark,clamp(1.5rem,3vw,2.375rem))/1 var(--font-family),sans-serif;letter-spacing:var(--wt-font-tracking-site-wordmark,-.015em);text-transform:uppercase}
+.brand-mark{display:block;width:.94em;height:.94em;flex:0 0 .94em;background:url('/favicon.png') center/contain no-repeat}
 .site-navigation{display:flex;align-items:center;gap:34px;margin-left:auto}
 .site-navigation .primary-nav{display:flex;align-items:center;gap:28px;color:var(--brand-purple);font-family:var(--font-family),sans-serif;font-size:13px;font-weight:var(--font-weight-black);line-height:1;text-transform:uppercase;letter-spacing:.025em}
 .site-navigation .primary-nav a{padding:12px 0}
@@ -512,7 +513,7 @@ p{margin-top:0;margin-bottom:1.25em}p:last-child{margin-bottom:0}p+p{margin-top:
 @media(max-width:800px){.tag-filter-bar{align-items:flex-start;flex-direction:column}.tag-filter-bar>p{text-align:left}.tag-review-card{grid-template-columns:1fr}.tag-card-actions{grid-row:2}.tag-edit-grid{grid-template-columns:1fr}}@media(max-width:560px){.tag-filter-bar>div{width:100%;overflow-x:auto}.tag-card-actions button{flex:1}.tag-edit-grid form{grid-template-columns:1fr}.tag-wide-field{grid-column:auto}.admin-nav{overflow-x:auto}.admin-nav a{flex:0 0 auto}}
 
 /* VAG Rounded optical spacing and wordmark alignment */
-.brand-wordmark{align-items:center;font-size:inherit;line-height:.82;letter-spacing:inherit;transform:translateY(1px)}
+.brand-wordmark{align-items:center;font-size:inherit;line-height:.82;letter-spacing:inherit}
 
 .article-hero h1{letter-spacing:-.02em}
 .story-section h2,.coverage-card h2,.related h2,.article-overview h2{letter-spacing:-.015em}

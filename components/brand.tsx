@@ -3,7 +3,14 @@
 import { BrandWordmark } from '@wildteam-uk/ui';
 
 export function Brand() {
-  return <a href="/" className="brand" aria-label="WILDNEWS home">
-    <BrandWordmark className="brand-wordmark" product="NEWS" aria-hidden="true" />
-  </a>;
+  return (
+    <a href="/" className="brand" aria-label="WildTeam News home">
+      <span className="brand-mark" aria-hidden="true" />
+      <BrandWordmark
+        className="brand-wordmark"
+        product="TEAM"
+        aria-hidden="true"
+      />
+    </a>
+  );
 }
