@@ -158,6 +158,8 @@ The admin surface standardises card borders and shadows through `--admin-card-bo
 
 `InteriorHeader` reuses the same public navigation on interior pages.
 
+The Jobs navigation link opens the independent WildJobs directory at `https://jobs.wildteam.org.uk/` in a new tab.
+
 ### Editorial heroes
 
 `ArchiveHero` and `PageHero` share the `editorial-hero` foundation. Both use the same shell width, vertical spacing, divider, title scale and full-width description. Archive heroes begin with a taxonomy or editorial pill and may include archive metadata; general-page heroes begin with an eyebrow. An archive description's optional trailing link uses the shared `descriptionLink` slot: it remains inline on larger screens and starts on a clean new line without leading or trailing whitespace on phones. New public informational pages should use `PageHero` rather than defining page-specific hero spacing or typography.
