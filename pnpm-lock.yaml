@@ -23,8 +23,8 @@ importers:
         specifier: ^2.0.0
         version: 2.0.0(react@19.3.1)
       '@wildteam-uk/tokens':
-        specifier: 0.3.0
-        version: 0.3.0
+        specifier: 0.3.1
+        version: 0.3.1
       '@wildteam-uk/ui':
         specifier: 0.2.1
         version: 0.2.1(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
@@ -1005,8 +1005,8 @@ packages:
   '@wildteam-uk/tokens@0.2.0':
     resolution: {integrity: sha512-5PpIoG4t6flDuzVmzDenNnMI61XVBK8XYC5P9l+vBVya+QdPhNDCtx//sX8JOyVmcnwjaTzQZ0XKLk4Ma0xb5Q==, tarball: https://npm.pkg.github.com/download/@wildteam-uk/tokens/0.2.0/44e4591057529739c35b4e5a2e28d313271bf1a6}
 
-  '@wildteam-uk/tokens@0.3.0':
-    resolution: {integrity: sha512-NA/t+mcnbaLXob143JV2UDdP34O1e5vkzextpOIcMHRNZiax+0Potm45N3QMsMp9Diza7ep9wpcyoe5T0vYRWQ==, tarball: https://npm.pkg.github.com/download/@wildteam-uk/tokens/0.3.0/d52932edf955d58ea3f13bf49c98d7c4c64498fc}
+  '@wildteam-uk/tokens@0.3.1':
+    resolution: {integrity: sha512-u0vEyyAprSwof6W7kzp6lm6qRn3zl8usHsn62cPs/Gqhzg8PCPmH8Q52m6UbOOidf9lBtaxPGTC0j1PvGenZLg==, tarball: https://npm.pkg.github.com/download/@wildteam-uk/tokens/0.3.1/2f4cd9308904be1963fcc1770f86420330ba3e85}
 
   '@wildteam-uk/ui@0.2.1':
     resolution: {integrity: sha512-n83QFyEZxuaTGqlUeeHPggtH8bmRb2a+AprJxJyYFsQ6ypTiojWmVt+/Spqa1nH//MS6e0FmAHbbLRSQsCODMA==, tarball: https://npm.pkg.github.com/download/@wildteam-uk/ui/0.2.1/1c4b9cde82b205a7664e5a95d19952015fa8fe74}
@@ -2420,7 +2420,7 @@ snapshots:
 
   '@wildteam-uk/tokens@0.2.0': {}
 
-  '@wildteam-uk/tokens@0.3.0': {}
+  '@wildteam-uk/tokens@0.3.1': {}
 
   '@wildteam-uk/ui@0.2.1(react-dom@19.3.1(react@19.3.1))(react@19.3.1)':
     dependencies:
