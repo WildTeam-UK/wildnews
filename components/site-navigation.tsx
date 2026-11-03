@@ -5,6 +5,7 @@ import { useState } from 'react';
 import { Brand } from '@/components/brand';
 
 const navigationLinks = [
+  { label: 'News', href: '/' },
   { label: 'Jobs', href: 'https://jobs.wildteam.org.uk/' },
   { label: 'Training', href: 'https://training.wildteam.org.uk/' },
   { label: 'WildNews Digest', href: '/digests' },
