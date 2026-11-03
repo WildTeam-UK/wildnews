@@ -14,6 +14,7 @@ import { cleanCopy, storyHref, storyImage, storyReadLabel } from '@/lib/stories'
 import { EDITORIAL_TOPICS } from '@/lib/taxonomy';
 import { DEFAULT_DESCRIPTION, DEFAULT_TITLE, pageMetadata } from '@/lib/seo';
 import { GoodNewsBadge } from '@/components/good-news-badge';
+import { operationalLog } from '@/lib/operational-log';
 
 const shelfTopics = [...EDITORIAL_TOPICS];
 
@@ -21,11 +22,19 @@ export const dynamic = 'force-dynamic';
 export const metadata: Metadata = pageMetadata({ title: DEFAULT_TITLE, description: DEFAULT_DESCRIPTION, path: '/' });
 
 export default async function Home() {
-  const [publishedRecords, goodNewsSettings, topicRecords] = await Promise.all([
+  const [latestResult, settingsResult, ...topicResults] = await Promise.allSettled([
     getPublishedStories(17),
     getGoodNewsSettings(),
-    Promise.all(shelfTopics.map(async (topic) => [topic, await getPublishedStoriesForTopic(topic, 12)] as const)),
-  ]);
+    ...shelfTopics.map((topic) => getPublishedStoriesForTopic(topic, 12)),
+  ] as const);
+  if (latestResult.status === 'rejected') throw latestResult.reason;
+  const publishedRecords = latestResult.value;
+  if (!publishedRecords.length) throw new Error('No published stories were available for the homepage.');
+  const goodNewsSettings = settingsResult.status === 'fulfilled' ? settingsResult.value : undefined;
+  const topicRecords = topicResults.map((result, index) => [shelfTopics[index], result.status === 'fulfilled' ? result.value : []] as const);
+  const optionalResults = [settingsResult, ...topicResults];
+  const degraded = optionalResults.some((result) => result.status === 'rejected');
+  for (const result of optionalResults) if (result.status === 'rejected') operationalLog('error', { operation: 'homepage_optional_section' }, result.reason);
   const published = publishedRecords.map((story) => publishedStoryToListing(story, goodNewsSettings));
   const liveStories = published;
   const [lead, ...moreStories] = liveStories;
@@ -33,7 +42,7 @@ export default async function Home() {
   const compactLatest = moreStories.slice(6, 16);
   const topicShelves = topicRecords.map(([topic, stories]) => ({ topic, stories: stories.map((story) => publishedStoryToListing(story, goodNewsSettings)) }));
 
-  return <main>
+  return <main data-public-page-degraded={degraded ? true : undefined}>
     <header className="site-header">
       <SiteNavigation />
     </header>

@@ -5,6 +5,7 @@ import { getSupabaseAdminClient } from '@/lib/supabase/admin';
 import { runTaxonomyGovernance } from '@/lib/taxonomy-governance';
 import { londonDateTimeParts, londonLocalDateTimeToUtc } from '@/lib/london-time';
 import { planSameDayPublicationTimes, remainingDailyArticleCapacity } from '@/lib/publication-planning';
+import { invalidatePublicPages } from '@/lib/invalidate-public-pages';
 
 export class PublicationQueueConflict extends Error {}
 
@@ -322,6 +323,7 @@ export async function publishClaimedQueueItem(queueId: string) {
     if (storyError || !story) throw storyError ?? new Error('Queued article was not found.');
     if (sourceError) throw sourceError;
     if (story.status === 'published') {
+      await invalidatePublicPages();
       await supabase.from('publication_queue').update({ status: 'published', published_at: story.published_at ?? new Date().toISOString(), claimed_at: null, hold_reason: null }).eq('id', queueId);
       return { action: 'already_published', storyId: story.id, headline: story.headline };
     }
@@ -345,10 +347,12 @@ export async function publishClaimedQueueItem(queueId: string) {
     const publishedAt = story.published_at ?? new Date().toISOString();
     const { data: published, error: publishError } = await supabase.from('stories').update({ status: 'published', published_at: publishedAt, reviewer_id: null }).eq('id', story.id).eq('status', 'draft').select('id').maybeSingle();
     if (publishError || !published) throw publishError ?? new Error('The draft changed before it could be published.');
+    await invalidatePublicPages();
     const { error: queueUpdateError } = await supabase.from('publication_queue').update({ status: 'published', published_at: publishedAt, claimed_at: null, hold_reason: null, last_error: null }).eq('id', queueId);
     await supabase.from('editorial_actions').insert({ story_id: story.id, user_id: null, action: 'published', notes: 'Article passed the automatic publication checklist and was published from the scheduled queue.' });
     try {
       await runTaxonomyGovernance({ includeTopics: true, maxEntities: 8 });
+      await invalidatePublicPages();
     } catch (error) {
       console.warn('Article published, but taxonomy governance could not be refreshed', error);
     }
