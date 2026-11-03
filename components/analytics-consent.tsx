@@ -41,12 +41,6 @@ function loadGoogleTagManager(analyticsChoice: ConsentChoice = 'granted') {
   if (document.querySelector(`script[data-wildnews-gtm="${GTM_ID}"]`)) return;
 
   updateGoogleConsent(analyticsChoice, 'default');
-  // Override GA's broad wildteam.org.uk rule before GTM configures the tag.
-  // Jobs uses a clean URL; keep the existing main-site and Training linking.
-  window.gtag!('set', 'linker', {
-    domains: ['www.wildteam.org.uk', 'training.wildteam.org.uk'],
-    accept_incoming: true,
-  });
   window.dataLayer!.push({ 'gtm.start': Date.now(), event: 'gtm.js' });
 
   const script = document.createElement('script');
