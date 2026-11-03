@@ -6,6 +6,7 @@ import { isCalendarDate } from '@/lib/validation';
 import { londonCalendarDateFormatter } from '@/lib/date-format';
 import { londonLocalDateTimeToUtc } from '@/lib/london-time';
 import { prepareDigestDistributions } from '@/lib/digest-distribution';
+import { invalidatePublicPages } from '@/lib/invalidate-public-pages';
 
 function londonPublicationTime(date: string) {
   const [year, month, day] = date.split('-').map(Number);
@@ -76,6 +77,7 @@ export async function publishDigest(storyId: string, { reviewerId, publicationDa
     .select('id')
     .maybeSingle();
   if (updateError || !updated) throw updateError ?? new Error('The digest could not be published.');
+  await invalidatePublicPages();
 
   await supabase.from('editorial_actions').insert({ story_id: storyId, user_id: reviewerId, action: 'published', notes: automated ? 'Digest generated and published automatically.' : 'Digest reviewed and published manually.' });
   let distribution: Awaited<ReturnType<typeof prepareDigestDistributions>> | null = null;

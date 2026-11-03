@@ -7,6 +7,7 @@ import { InteriorHeader } from '@/components/interior-header';
 import { JsonLd } from '@/components/json-ld';
 import { getGoodNewsSettings, getPublishedStories, getPublishedStory, publishedStoryToArticle, publishedStoryToListing, publishedTopics, relatedPublishedStories } from '@/lib/published-stories';
 import { articleMetadata, newsArticleJsonLd, withSiteName } from '@/lib/seo';
+import { operationalLog } from '@/lib/operational-log';
 
 export const dynamic = 'force-dynamic';
 
@@ -26,12 +27,16 @@ export default async function StoryPage({ params }: { params: Promise<{ slug: st
   const published = await getPublishedStory(slug);
   if (!published) notFound();
 
-  const [allPublished, goodNewsSettings] = await Promise.all([getPublishedStories(20), getGoodNewsSettings()]);
+  const [relatedResult, settingsResult] = await Promise.allSettled([getPublishedStories(20), getGoodNewsSettings()]);
+  const allPublished = relatedResult.status === 'fulfilled' ? relatedResult.value : [];
+  const goodNewsSettings = settingsResult.status === 'fulfilled' ? settingsResult.value : undefined;
+  const degraded = relatedResult.status === 'rejected' || settingsResult.status === 'rejected';
+  for (const result of [relatedResult, settingsResult]) if (result.status === 'rejected') operationalLog('error', { operation: 'story_optional_section' }, result.reason);
   const related = relatedPublishedStories([published], allPublished).map((story) => publishedStoryToListing(story, goodNewsSettings));
   const article = publishedStoryToArticle(published, goodNewsSettings);
   const structuredData = newsArticleJsonLd({ headline: published.headline, description: published.standfirst, path: `/stories/${published.slug}`, image: article.imageUrl, publishedTime: published.published_at, modifiedTime: published.editorial_updated_at ?? published.published_at, sections: publishedTopics(published) });
 
-  return <main>
+  return <main data-public-page-degraded={degraded ? true : undefined}>
     <InteriorHeader />
     <JsonLd data={structuredData} />
     <ArticleTemplate article={article} storyId={published.id} sharePath={`/stories/${published.slug}`} />

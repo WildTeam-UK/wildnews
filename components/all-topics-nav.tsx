@@ -1,10 +1,13 @@
 import { TopicNav } from '@/components/topic-nav';
-import { getPublishedStories, publishedTopics } from '@/lib/published-stories';
+import { getPopulatedPublicTopics } from '@/lib/published-stories';
 import { EDITORIAL_TOPICS } from '@/lib/taxonomy';
+import { operationalLog } from '@/lib/operational-log';
 
 export async function AllTopicsNav() {
-  const published = await getPublishedStories(200);
-  const populatedTopics = [...new Set(published.flatMap(publishedTopics))];
+  const populatedTopics = await getPopulatedPublicTopics().catch((error: unknown) => {
+    operationalLog('error', { operation: 'public_topic_navigation' }, error);
+    return [...EDITORIAL_TOPICS];
+  });
   const navigationTopics = EDITORIAL_TOPICS.filter((topic) => populatedTopics.includes(topic));
 
   if (!navigationTopics.length) return null;

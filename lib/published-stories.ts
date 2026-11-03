@@ -8,6 +8,9 @@ import { normalizeEditorialTopics } from '@/lib/taxonomy';
 import type { TrainingCoursePromotion } from '@/lib/training-courses';
 import { attachStoredArticleLinks, type ArticleLinkSection, type ArticleLinkType } from '@/lib/article-linking';
 import { firstRelation } from '@/lib/supabase/relations';
+import React from 'react';
+
+const { cache } = React;
 
 type PublishedSource = { id: string; source_name: string; source_title: string; source_url: string; source_role: string; display_order: number };
 type PublishedTopicLink = { topics: { name: string; slug: string } | { name: string; slug: string }[] | null };
@@ -45,8 +48,16 @@ type PublishedStoryDetail = PublishedStory & {
   story_editorial_revisions: PublishedEditorialUpdate[];
 };
 
-const storyListingSelect = 'id, slug, headline, standfirst, image_url, image_alt, published_at, updated_at, editorial_updated_at, editorial_change_summary, content_type, digest_period_end, generation_metadata, story_topics(topics(name, slug)), story_tags(confidence, content_tags(name, slug, status)), story_conservation_outlooks(classification, score, confidence, rationale)';
-const storyDetailSelect = `${storyListingSelect}, story_sources(id, source_name, source_title, source_url, source_role, display_order), story_course_recommendations(placement, confidence, rationale, training_courses(id, title, short_title, description, course_url, primary_colour, ad_headline, ad_description, cta_label)), story_contextual_links(link_type, target_id, href, anchor_text, section_key, item_index, external, confidence, rationale), story_editorial_revisions(id, change_summary, applied_at, public_content_changed, public_source_ids)`;
+const storyBaseSelect = 'id, slug, headline, standfirst, image_url, image_alt, published_at, updated_at, editorial_updated_at, editorial_change_summary, content_type, digest_period_end, story_topics(topics(name, slug)), story_tags(confidence, content_tags(name, slug, status)), story_conservation_outlooks(classification, score, confidence, rationale)';
+const storyListingSelect = `${storyBaseSelect}, article_topics:generation_metadata->article_content->topics, digest_topics:generation_metadata->digest_content->topics, article_image:generation_metadata->article_content->>image_url, digest_sources:generation_metadata->digest_source_stories`;
+const storyDetailSelect = `${storyBaseSelect}, generation_metadata, story_sources(id, source_name, source_title, source_url, source_role, display_order), story_course_recommendations(placement, confidence, rationale, training_courses(id, title, short_title, description, course_url, primary_colour, ad_headline, ad_description, cta_label)), story_contextual_links(link_type, target_id, href, anchor_text, section_key, item_index, external, confidence, rationale), story_editorial_revisions(id, change_summary, applied_at, public_content_changed, public_source_ids)`;
+
+function listingRecords(rows: unknown[]): PublishedStory[] {
+  return rows.map((value) => {
+    const row = value as PublishedStory & { article_topics?: string[]; digest_topics?: string[]; article_image?: string; digest_sources?: DigestSourceStory[] };
+    return { ...row, generation_metadata: { article_content: { topics: row.article_topics ?? [], image_url: row.article_image ?? '' }, digest_content: { topics: row.digest_topics ?? [] }, digest_source_stories: row.digest_sources ?? [] } };
+  });
+}
 
 export function publishedTopics(story: PublishedStory) {
   const article = (story.generation_metadata.article_content ?? {}) as Partial<StoryDraftContent>;
@@ -66,11 +77,11 @@ export function publishedConservationOutlook(story: PublishedStory) {
   return firstRelation(story.story_conservation_outlooks);
 }
 
-export async function getGoodNewsSettings() {
+export const getGoodNewsSettings = cache(async () => {
   const { data, error } = await getSupabasePublicClient().from('good_news_settings').select('minimum_score, minimum_confidence').eq('id', true).single();
   if (error) throw error;
   return data as { minimum_score: number; minimum_confidence: number };
-}
+});
 
 export type GoodNewsSettings = Awaited<ReturnType<typeof getGoodNewsSettings>>;
 
@@ -80,29 +91,29 @@ export function isPublishedGoodNews(story: PublishedStory, settings?: GoodNewsSe
   return outlook?.classification === 'positive' && outlook.score >= settings.minimum_score && outlook.confidence >= settings.minimum_confidence;
 }
 
-export async function getPublicTopic(slug: string): Promise<PublicTaxonomyArchive | null> {
+export const getPublicTopic = cache(async (slug: string): Promise<PublicTaxonomyArchive | null> => {
   const { data, error } = await getSupabasePublicClient().from('topics').select('name, slug, description, seo_title, meta_description').eq('slug', slug).eq('active', true).maybeSingle();
   if (error) throw error;
   return data as PublicTaxonomyArchive | null;
-}
+});
 
-export async function getPublicTag(slug: string): Promise<PublicTaxonomyArchive | null> {
+export const getPublicTag = cache(async (slug: string): Promise<PublicTaxonomyArchive | null> => {
   const { data, error } = await getSupabasePublicClient().from('content_tags').select('name, slug, description, seo_title, meta_description').eq('slug', slug).eq('status', 'approved').maybeSingle();
   if (error) throw error;
   return data as PublicTaxonomyArchive | null;
-}
+});
 
-export async function getPublishedStory(slug: string): Promise<PublishedStoryDetail | null> {
+export const getPublishedStory = cache(async (slug: string): Promise<PublishedStoryDetail | null> => {
   const { data, error } = await getSupabasePublicClient().from('stories').select(storyDetailSelect).eq('slug', slug).eq('content_type', 'news').eq('status', 'published').lte('published_at', new Date().toISOString()).maybeSingle();
   if (error) throw error;
   return data as unknown as PublishedStoryDetail | null;
-}
+});
 
-export async function getPublishedStories(limit = 100): Promise<PublishedStory[]> {
+export const getPublishedStories = cache(async (limit = 100): Promise<PublishedStory[]> => {
   const { data, error } = await getSupabasePublicClient().from('stories').select(storyListingSelect).eq('status', 'published').lte('published_at', new Date().toISOString()).order('published_at', { ascending: false }).limit(limit);
   if (error) throw error;
-  return (data ?? []) as unknown as PublishedStory[];
-}
+  return listingRecords(data ?? []);
+});
 
 export async function getPublishedStoriesForTopic(topic: string, limit = 12): Promise<PublishedStory[]> {
   const topicMatchSelect = `${storyListingSelect}, homepage_topic:story_topics!inner(topics!inner(name))`;
@@ -114,7 +125,17 @@ export async function getPublishedStoriesForTopic(topic: string, limit = 12): Pr
     .order('published_at', { ascending: false })
     .limit(limit);
   if (error) throw error;
-  return (data ?? []) as unknown as PublishedStory[];
+  return listingRecords(data ?? []);
+}
+
+export async function getPopulatedPublicTopics(): Promise<string[]> {
+  const { data, error } = await getSupabasePublicClient().from('topics')
+    .select('name, story_topics!inner(stories!inner(id))')
+    .eq('active', true)
+    .eq('story_topics.stories.status', 'published')
+    .lte('story_topics.stories.published_at', new Date().toISOString());
+  if (error) throw error;
+  return (data ?? []).map((topic) => topic.name);
 }
 
 export async function getAllPublishedStories(maximum = 50_000): Promise<PublishedStory[]> {
@@ -130,7 +151,7 @@ export async function getAllPublishedStories(maximum = 50_000): Promise<Publishe
       .order('id', { ascending: false })
       .range(stories.length, stories.length + batchSize - 1);
     if (error) throw error;
-    const batch = (data ?? []) as unknown as PublishedStory[];
+    const batch = listingRecords(data ?? []);
     stories.push(...batch);
     if (batch.length < batchSize) break;
   }

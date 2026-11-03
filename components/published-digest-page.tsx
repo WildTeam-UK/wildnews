@@ -6,6 +6,7 @@ import { JsonLd } from '@/components/json-ld';
 import { SiteFooter } from '@/components/site-footer';
 import { cleanDigestText, digestPath, getPublishedDailyDigests, getPublishedDigest, type DigestContent, type DigestType } from '@/lib/digests';
 import { articleMetadata, newsArticleJsonLd, withSiteName } from '@/lib/seo';
+import { operationalLog } from '@/lib/operational-log';
 
 export async function publishedDigestMetadata(type: DigestType, date: string): Promise<Metadata> {
   const digest = await getPublishedDigest(type, date);
@@ -29,7 +30,7 @@ export async function publishedDigestMetadata(type: DigestType, date: string): P
 export async function PublishedDigestPage({ type, date }: { type: DigestType; date: string }) {
   const [digest, moreDigests] = await Promise.all([
     getPublishedDigest(type, date),
-    type === 'daily' ? getPublishedDailyDigests(7) : Promise.resolve(undefined),
+    type === 'daily' ? getPublishedDailyDigests(7).catch((error: unknown) => { operationalLog('error', { operation: 'digest_optional_related' }, error); return undefined; }) : Promise.resolve(undefined),
   ]);
   const content = digest?.generation_metadata.digest_content as DigestContent | undefined;
   if (!digest || !content) notFound();

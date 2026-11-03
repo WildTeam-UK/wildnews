@@ -2,6 +2,9 @@ import type { EditorialImageCredit } from '@/lib/images/types';
 import type { ArticleContextualLink } from '@/lib/article-linking';
 import { cleanAiText } from '@/lib/openai/house-style';
 import { getSupabasePublicClient } from '@/lib/supabase/public';
+import React from 'react';
+
+const { cache } = React;
 
 export type DigestType = 'daily' | 'weekly';
 
@@ -89,13 +92,13 @@ type SourceImageMetadata = {
 export async function hydrateDigestSourceStories(stories: DigestSourceStory[]) {
   if (!stories.length) return stories;
   const { data, error } = await getSupabasePublicClient().from('stories')
-    .select('id, image_url, image_alt, generation_metadata, story_topics(topics(name))')
+    .select('id, image_url, image_alt, article_image:generation_metadata->article_content->>image_url, article_alt:generation_metadata->article_content->>image_alt, article_credit:generation_metadata->article_content->image_credit, story_topics(topics(name))')
     .in('id', stories.map((story) => story.id));
   if (error) throw error;
   const byId = new Map((data ?? []).map((row) => [row.id, row]));
   return stories.map((story) => {
     const row = byId.get(story.id);
-    const metadata = (row?.generation_metadata ?? {}) as SourceImageMetadata;
+    const metadata: SourceImageMetadata = { article_content: { image_url: row?.article_image as string | null, image_alt: row?.article_alt as string | null, image_credit: row?.article_credit as EditorialImageCredit | null } };
     const article = metadata.article_content ?? {};
     const topicLinks = (row?.story_topics ?? []) as unknown as Array<{ topics: { name: string } | { name: string }[] | null }>;
     const linkedTopics = topicLinks.flatMap((link) => Array.isArray(link.topics) ? link.topics.map((topic) => topic.name) : link.topics?.name ?? []);
@@ -109,7 +112,7 @@ export async function hydrateDigestSourceStories(stories: DigestSourceStory[]) {
   });
 }
 
-export async function getPublishedDigest(type: DigestType, date: string) {
+export const getPublishedDigest = cache(async (type: DigestType, date: string) => {
   const { data, error } = await getSupabasePublicClient().from('stories')
     .select('id, slug, status, content_type, headline, standfirst, image_url, image_alt, published_at, updated_at, digest_period_start, digest_period_end, generation_metadata')
     .eq('slug', `${type}-digest-${date}`)
@@ -128,18 +131,18 @@ export async function getPublishedDigest(type: DigestType, date: string) {
     image_alt: record.image_alt ?? fallbackImage?.image_alt ?? null,
     generation_metadata: { ...record.generation_metadata, digest_source_stories: sources },
   };
-}
+});
 
 async function getPublishedDigests(type: DigestType, limit: number) {
   const { data, error } = await getSupabasePublicClient().from('stories')
-    .select('id, slug, status, content_type, headline, standfirst, image_url, image_alt, published_at, updated_at, digest_period_start, digest_period_end, generation_metadata')
+    .select('id, slug, status, content_type, headline, standfirst, image_url, image_alt, published_at, updated_at, digest_period_start, digest_period_end')
     .eq('content_type', `${type}_digest`)
     .eq('status', 'published')
     .lte('published_at', new Date().toISOString())
     .order('published_at', { ascending: false })
     .limit(limit);
   if (error) throw error;
-  return (data ?? []) as DigestStoryRecord[];
+  return (data ?? []).map((row) => ({ ...row, generation_metadata: {} })) as DigestStoryRecord[];
 }
 
 export async function getPublishedWeeklyDigests(limit = 52) {

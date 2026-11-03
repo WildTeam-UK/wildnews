@@ -33,10 +33,10 @@ The public application reads published records with the Supabase publishable key
 
 ## Repository and delivery
 
-- Repository: `https://github.com/WildTeam-UK/conservation-news.git`
+- Repository: `https://github.com/WildTeam-UK/wildnews.git`
 - Primary branch: `main`
 - Feature work is performed on separate branches, previewed by Vercel, reviewed, then merged into `main`.
-- Vercel production project: `conservation-news`
+- Vercel production project: `wildnews` (the legacy `conservation-news.vercel.app` alias remains attached)
 - Intended canonical domain: `https://news.wildteam.org.uk`
 - Current framework declaration: Nitro in `vercel.json`
 - Build command: `vite build`
@@ -202,6 +202,12 @@ Editors can archive either a private or published news article without deleting 
 
 Published content is read dynamically for the homepage, archives, related stories, sitemap, structured data and `llms.txt`.
 
+Anonymous public HTML is protected by the Nitro `server/public-availability.ts` middleware and the Vercel Runtime Cache. Successful representations are fresh for 60 seconds; a previous successful representation may be served while refreshing until its original age reaches five minutes. Concurrent GET and HEAD misses share a render within each function instance, and both use the same canonical GET representation. Cache entries are separated by deployment identity to prevent old HTML referring to a different deployment's JavaScript. Tracking parameters do not multiply cache entries. Admin, API, authenticated-cookie, preview-cookie, RSC, action and semantic-query requests bypass this cache. Only successful, complete, cookie-free HTML below the cache item size limit is stored. Error boundaries and streamed server errors become HTTP 503 and are not cached; partially degraded homepages remain readable but are not stored.
+
+Public lists project only their required metadata instead of whole generated articles. Topic navigation queries populated topics directly. React request memoization shares repeated metadata/body reads, and public database requests have a six-second deadline without automatic application retries. Optional homepage shelves, Good News badges, article recommendations and related digest editions do not prevent the principal content rendering.
+
+Successful admin mutations invalidate public pages. Automatic article publication, digest publication and applied editorial revisions also invalidate them. Runtime entries and CDN representations use the `wildnews-public-pages-v1` tag; invalidation retires an epoch so older in-flight renders cannot repopulate the current cache. The CDN freshness never extends beyond the snapshot's original 60-second lifetime. Cache invalidation failures are logged without retrying an already committed publication; the bounded cache lifetime remains the final safeguard. Direct database changes outside these application workflows rely on expiry and require an explicit cache purge for urgent removals. No private data is cached. The official SDK uses memory locally; production verification must confirm that Vercel supplies Runtime Cache support.
+
 New reporting matched to an existing news cluster creates a pending coverage update. When article-update automation is enabled, the heartbeat atomically leases one article's pending sources, groups up to five of them into one protected revision, and supplies the collected source text, existing structured article and source map to the dedicated update editor. It makes the smallest source-grounded copy changes justified by the new reporting and preserves unchanged copy and citations. If the reporting adds no meaningful public information, the revision is explicitly marked source-only instead of rewriting for stylistic variety. OpenAI then compares the stored before-and-after article content and linked coverage evidence to generate the concise public “What changed” summary. Generation and validation must succeed before the revision can be applied. Applying the revision is an explicit database transaction that updates the article and source coverage, records the revision decisions, and preserves the original `published_at` value. Leases recover interrupted work, retries are delayed, and processing stops after three failed attempts so an editor can use the existing review controls. Disabling update automation restores the fully manual prepare, review and apply path. The application records revision-draft and summary generations with their estimated costs in `ai_generations`. Source-only revisions retain their source and audit history without changing the SEO editorial modification date. Applied content and source-only revisions appear in a compact public editorial-history disclosure using only the safe revision date, description, type and stable `source-N` references exposed through RLS; those references cite the same numbered reporting listed on the article while private before-and-after content remains admin-only. A database trigger also prevents later news-article updates from replacing an existing publication timestamp accidentally. Published revisions with genuine copy changes set `editorial_updated_at` and the generated public change summary. Routine metadata changes and corrections update the database audit timestamp but do not create a public editorial-update date. Unpublishing an article for correction also preserves its original publication date for later republication.
 
 Public article dates therefore use `published_at` as the original publication date and `editorial_updated_at` only for an explicitly applied editorial content update. Articles with applied revisions show their original date, latest revision date and expandable history, including source-only additions. Chronological archives continue to order by `published_at`, while SEO `dateModified` and sitemap modification dates use the editorial update date only when public article copy changed. Existing articles are not backfilled with editorial update timestamps.
@@ -275,7 +281,9 @@ Vercel Speed Insights records Core Web Vitals for public production pages only. 
 
 ### Availability and automation health
 
-`/api/health` is the production monitoring endpoint. It returns no records or error details, but verifies that Supabase is reachable, the one-minute automation heartbeat is current, and enabled editorial, publishing, digest and distribution systems have not recorded an unresolved automation failure. A failed or uncertain delivery makes enabled distribution unhealthy until an editor resolves or retries it. A required heartbeat older than ten minutes makes the endpoint return HTTP 503; a healthy or intentionally disabled system returns HTTP 200. The endpoint is uncached and excluded from search indexing so an external uptime service can use its HTTP status for alerts without receiving private operational data.
+`instrumentation.ts` records server render/route failures through Vinext's `onRequestError` hook. `lib/operational-log.ts` emits structured, allowlisted operation, route, duration, error-code, digest, deployment and correlation fields without raw errors, request bodies, headers, cookies or query strings. The public error boundary submits only its pathname and digest to the same-origin `/api/client-errors` endpoint, which limits body size and reports per instance. A bounded HEAD-request counter logs bursts for observation only; it never blocks visitors. Database error/slow-read logs and render failures are independent of analytics consent.
+
+`/api/health` is the production monitoring endpoint. It returns no records or error details, but verifies that Supabase is reachable through the public published-story query as well as privileged automation checks, that the one-minute automation heartbeat is current, and that enabled editorial, publishing, digest and distribution systems have not recorded an unresolved automation failure. A detected public render failure marks public pages unhealthy until the affected path renders successfully or the ten-minute failure marker expires. A failed or uncertain delivery makes enabled distribution unhealthy until an editor resolves or retries it. A required heartbeat older than ten minutes makes the endpoint return HTTP 503; a healthy or intentionally disabled system returns HTTP 200. The endpoint is uncached and excluded from search indexing so an external uptime service can use its HTTP status for alerts without receiving private operational data. Monitoring should additionally GET the homepage and a story and verify expected rendered content, rather than treating any HTTP 200 as proof of successful rendering.
 
 ### Backup and recovery
 
@@ -306,6 +314,9 @@ Only names and purposes belong in source control.
 | `BUFFER_CHANNEL_IDS` | Server configuration | Comma-separated Buffer channels that receive published digests |
 | `AUTOMATION_SECRET` | Server only | Bearer secret for the scheduled automation endpoint |
 | `VERCEL_ENV` | Platform supplied | Distinguishes production from preview for indexing |
+| `VERCEL` | Platform supplied | Enables Vercel CDN tag deletion after public editorial mutations |
+| `VERCEL_DEPLOYMENT_ID` | Platform supplied | Separates cached HTML by deployment and identifies structured errors |
+| `VERCEL_URL` | Platform supplied | Cache deployment identity fallback when the deployment ID is unavailable |
 | `NODE_ENV` | Platform supplied | Runtime mode fallback |
 | `CODEX_SANDBOX` | Local tooling | Enables polling for local sandbox HMR |
 
@@ -341,6 +352,8 @@ pnpm exec oxlint <changed files>
 git diff --check
 pnpm build
 ```
+
+Availability regression checks additionally run `node --experimental-strip-types --test tests/public-page-cache.test.ts`. After building, run `node --env-file=.env.local scripts/verify-public-availability.mjs` with the two browser-safe Supabase variables configured. The integration check starts a local public-data proxy and production build, injects query failures, exercises warm and cold request bursts, and tests authenticated withdrawal against an in-memory fixture. It rejects every upstream production write and uses no real admin credentials. It requires local ports 3101 and 3102. Temporary rendered HTML and sanitized server logs are written under `/tmp/wildnews-*` for inspection.
 
 Deployment verification must additionally cover Supabase connectivity, admin authentication, the automation heartbeat, collection, draft creation, queue publication, digest generation, newsletter signup, public metadata, structured data, sitemap, robots and `llms.txt`.
 

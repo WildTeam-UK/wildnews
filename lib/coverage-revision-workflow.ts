@@ -6,6 +6,7 @@ import { generateEditorialRevision, revisionChangesPublicContent } from '@/lib/o
 import { generateRevisionSummary, type RevisionSummaryEvidence } from '@/lib/openai/generate-revision-summary';
 import { publicRevisionSourceIds } from '@/lib/revision-source-references';
 import { firstRelation, sourceRelationName } from '@/lib/supabase/relations';
+import { invalidatePublicPages } from '@/lib/invalidate-public-pages';
 
 type StoredSource = {
   id: string;
@@ -214,6 +215,7 @@ export async function applyEditorialRevision(supabase: SupabaseClient, revisionI
   }
   const { data: storyId, error: applyError } = await supabase.rpc('apply_story_editorial_revision_v2', { target_revision_id: revisionId, has_public_content_changes: contentChanged });
   if (applyError) throw applyError;
+  await invalidatePublicPages();
 
   const warnings: string[] = [];
   try {
@@ -238,6 +240,7 @@ export async function applyEditorialRevision(supabase: SupabaseClient, revisionI
       warnings.push('Unsplash selection tracking could not be recorded.');
     }
   }
+  await invalidatePublicPages();
   return { applied: true as const, storyId, warnings, contentChanged };
 }
 
