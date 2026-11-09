@@ -13,6 +13,7 @@ const footerColumns: Array<{ title: string; links: FooterLink[] }> = [
       { label: 'Our plan', href: 'https://www.wildteam.org.uk/conservation-plan' },
       { label: 'Our impact', href: 'https://www.wildteam.org.uk/conservation-impact' },
       { label: 'Our partners', href: 'https://www.wildteam.org.uk/conservation-partners' },
+      { label: 'How we use AI', href: '/how-we-use-ai' },
       { label: 'Get in touch', href: 'https://training.wildteam.org.uk/contact-us' },
       { label: 'Community', href: 'https://training.wildteam.org.uk/social' },
       { label: 'Newsletter', href: 'https://training.wildteam.org.uk/newsletter' },
