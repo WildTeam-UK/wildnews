@@ -186,6 +186,7 @@ export function publishedStoryToArticle(story: PublishedStoryDetail, goodNewsSet
     .sort((a, b) => new Date(b.applied_at).getTime() - new Date(a.applied_at).getTime())
     .map((revision) => ({ date: revision.applied_at, summary: revision.change_summary, sourceIds: [...new Set(revision.public_source_ids ?? [])].filter((sourceId) => validSourceIds.has(sourceId)), sourceOnly: !revision.public_content_changed }));
   return {
+    templateVersion: content.template_version,
     topics: publishedTopics(story),
     discoveryTags: publishedTags(story).slice(0, 3),
     headline: story.headline,

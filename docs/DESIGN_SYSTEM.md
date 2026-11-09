@@ -79,7 +79,7 @@ Implemented hierarchy:
 - Card titles: commonly 21–25px.
 - Section headings: commonly 36–44px, depending on context and viewport.
 - Feature and archive titles: responsive `clamp()` sizes, normally around 48–96px.
-- Article hero titles: up to approximately 104px on wide screens and 48px on phones.
+- Article hero titles: `clamp(40px, 5.5vw, 72px)` with a 1.02 line height. Their maximum width shares the 900px article-overview measure through `--article-reading-width`.
 - Display headings use tight line height and negative letter spacing. Body copy uses normal tracking.
 
 The `WILDNEWS` wordmark uses weight 950, tight tracking and separate purple `WILD` and pink `NEWS` spans. Inline branding follows this treatment except inside the digest hero, newsletter CTAs and training banner, where it inherits the surrounding typography and colour.
@@ -230,7 +230,7 @@ The article template is shared by every published news story:
 1. Centred hero with Good News/topic pills, title and compact coverage summary.
 2. Full-width lead image with attribution.
 3. “The story at a glance” introduction, discovery tags, update date and share controls. The controls form a vertical rail beside the introduction on desktop, then move above the discovery tags in a horizontal row at 1000px and below.
-4. Structured editorial sections: what you need to know, why it matters, what happens next, what is known, what is unknown, source reporting and article feedback. These use their descriptive headings without additional eyebrow labels and retain one consistent gap between sections.
+4. Structured editorial sections: what you need to know, why it matters, what happens next, source reporting and article feedback. Newly created articles use template version 3: they omit “What we know” and show an optional “What's still unclear” section only when it contains one to three useful, sourced uncertainties. Existing articles, including private and scheduled drafts, retain template version 2 and their original “What we know” and “What we don't know” sections. These use their descriptive headings without additional eyebrow labels and retain one consistent gap between sections.
 5. Sticky desktop sidebar containing coverage analysis and a course promotion.
 6. Newsletter CTA and related-story discovery supplied by the page route.
 

@@ -15,11 +15,12 @@ function SourceReferences({ ids, sources, onChange }: { ids: string[]; sources: 
   return <span className="draft-source-selector">{[...sources.values()].map((source) => <span className="draft-source-option" key={source.id}><label title={`Use ${source.publisher}: ${source.title}`}><input type="checkbox" aria-label={`Use source ${source.id.replace('source-', '')}, ${source.publisher}: ${source.title}`} checked={ids.includes(source.id)} onChange={(event) => onChange(event.target.checked ? [...new Set([...ids, source.id])] : ids.filter((id) => id !== source.id))} /><span>{source.id.replace('source-', '')}</span></label><a href={source.url} target="_blank" rel="noopener noreferrer" title={`${source.publisher}: ${source.title}`}>{source.publisher}</a></span>)}</span>;
 }
 
-function SourcedFields({ label, items, sources, onChange }: { label: string; items: SourcedDraftText[]; sources: Map<string, DraftSource>; onChange: (items: SourcedDraftText[]) => void }) {
+function SourcedFields({ label, items, sources, onChange, optional = false }: { label: string; items: SourcedDraftText[]; sources: Map<string, DraftSource>; onChange: (items: SourcedDraftText[]) => void; optional?: boolean }) {
   return <fieldset className="draft-fieldset"><legend>{label}</legend>{items.map((item, index) => <div className="draft-sourced-field" key={`${label}-${index}`}>
     <textarea aria-label={`${label}, item ${index + 1}`} value={item.text} onChange={(event) => onChange(items.map((current, currentIndex) => currentIndex === index ? { ...current, text: event.target.value } : current))} rows={3} />
     <div><span>Supporting sources</span><SourceReferences ids={item.source_ids} sources={sources} onChange={(source_ids) => onChange(items.map((current, currentIndex) => currentIndex === index ? { ...current, source_ids } : current))} /></div>
-  </div>)}</fieldset>;
+    {optional ? <button className="admin-secondary-button" type="button" onClick={() => onChange(items.filter((_, currentIndex) => currentIndex !== index))}>Remove point {index + 1}</button> : null}
+  </div>)}{optional ? <><p className="draft-section-note">Optional: include only distinct, source-backed uncertainties. Keep essential caveats beside the relevant claims in the core copy.</p>{items.length < 3 ? <button className="admin-secondary-button" type="button" onClick={() => onChange([...items, { text: '', source_ids: [] }])}>Add uncertainty</button> : null}</> : null}</fieldset>;
 }
 
 function SingleSourcedField({ label, item, sources, onChange }: { label: string; item: SourcedDraftText; sources: Map<string, DraftSource>; onChange: (item: SourcedDraftText) => void }) {
@@ -177,6 +178,7 @@ export function DraftEditor({
   }
 
   const article: ArticleTemplateData = {
+    templateVersion: content.template_version,
     topics: content.topics,
     headline: content.headline,
     storyAtAGlance: content.story_at_a_glance.map((item) => ({ text: item.text, sourceIds: item.source_ids })),
@@ -235,8 +237,8 @@ export function DraftEditor({
         <SourcedFields label="What you need to know — five points" items={content.key_takeaways} sources={sources} onChange={(key_takeaways) => setContent({ ...content, key_takeaways })} />
         <SingleSourcedField label="Why this matters" item={content.why_it_matters} sources={sources} onChange={(why_it_matters) => setContent({ ...content, why_it_matters })} />
         <SingleSourcedField label="What happens next" item={content.what_happens_next} sources={sources} onChange={(what_happens_next) => setContent({ ...content, what_happens_next })} />
-        <SourcedFields label="What we know" items={content.what_we_know} sources={sources} onChange={(what_we_know) => setContent({ ...content, what_we_know })} />
-        <SourcedFields label="What we don't know" items={content.what_we_dont_know} sources={sources} onChange={(what_we_dont_know) => setContent({ ...content, what_we_dont_know })} />
+        {content.template_version !== 3 ? <SourcedFields label="What we know" items={content.what_we_know} sources={sources} onChange={(what_we_know) => setContent({ ...content, what_we_know })} /> : null}
+        <SourcedFields label={content.template_version === 3 ? "What's still unclear" : "What we don't know"} optional={content.template_version === 3} items={content.what_we_dont_know} sources={sources} onChange={(what_we_dont_know) => setContent({ ...content, what_we_dont_know })} />
       </section>
 
       <section className="draft-edit-section"><div className="draft-section-heading"><div><h3>Coverage analysis</h3><p className="draft-section-note">These calibrated scores power both coverage panels in the article.</p></div>{allowCoverageRecalculation ? <button className="admin-secondary-button" type="button" onClick={recalculateCoverage} disabled={recalculating}>{recalculating ? <><LoaderCircle className="admin-spinner" /> Recalculating</> : <><RotateCcw /> Recalculate coverage</>}</button> : null}</div><div className="draft-score-fields">
