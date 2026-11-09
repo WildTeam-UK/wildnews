@@ -4,7 +4,7 @@ import { aiInstructions, parseAiJson } from '@/lib/openai/house-style';
 import { estimateLunaTokenCost } from '@/lib/openai/pricing';
 
 const MODEL = 'gpt-6-luna';
-const PROMPT_VERSION = 'coverage-revision-v1';
+const PROMPT_VERSION = 'coverage-revision-v2-versioned-template';
 
 type RevisionSource = {
   id: string;
@@ -94,6 +94,7 @@ export async function generateEditorialRevision(input: {
   sources: RevisionSource[];
   update: CoverageRevisionEvidence;
 }): Promise<EditorialRevisionResult> {
+  const concise = input.currentContent.template_version === 3;
   const sourceIds = [...new Set(input.sources.map((source) => source.id))];
   const sourcedTextSchema = {
     type: 'object',
@@ -114,7 +115,7 @@ The existing article is already published, accurate source-grounded copy. Treat 
 
 Decide first whether the new reporting materially adds, corrects or qualifies information that readers should see. If it only repeats the article, set change_required to false. When no change is required, reproduce the existing article copy and citations exactly. Adding a source alone is not an editorial content change.
 
-When a change is required, make the smallest useful revision. Preserve accurate existing wording, structure, qualifications and uncertainty. Incorporate only meaningful new information supported by the supplied new reporting, cite its assigned source ID wherever it supports changed copy, and retain existing source IDs for retained claims. Do not rewrite the article for stylistic variety. Do not change topics, coverage scores, images or image metadata. Maintain exactly two “story at a glance” paragraphs, exactly five “what you need to know” points, one “why it matters” paragraph, one “what happens next” paragraph, and three to five points in each evidence section. The SEO title must not append WildNews.
+When a change is required, make the smallest useful revision. Preserve accurate existing wording, structure, qualifications and uncertainty. Incorporate only meaningful new information supported by the supplied new reporting, cite its assigned source ID wherever it supports changed copy, and retain existing source IDs for retained claims. Do not rewrite the article for stylistic variety. Do not change topics, coverage scores, images or image metadata. Maintain exactly two “story at a glance” paragraphs, exactly five “what you need to know” points, one “why it matters” paragraph and one “what happens next” paragraph. ${concise ? 'This article uses template version 3. Keep what_we_know empty. The what_we_dont_know array is the optional “What\'s still unclear” section: return zero to three distinct, material, source-supported uncertainties, and keep it empty when it adds nothing. Keep essential qualifications with the relevant core claims. Preserve a substantial core briefing of at least 350 words, excluding the optional section; never add filler or invent detail.' : 'This article uses the original template. Preserve its “What we know” and “What we don\'t know” sections, with three to five points each. Do not convert it to the newer template.'} The SEO title must not append WildNews.
 
 Return only the requested structured data.`),
     input: JSON.stringify({
@@ -145,8 +146,8 @@ Return only the requested structured data.`),
           key_takeaways: { type: 'array', minItems: 5, maxItems: 5, items: sourcedTextSchema },
           why_it_matters: sourcedTextSchema,
           what_happens_next: sourcedTextSchema,
-          what_we_know: { type: 'array', minItems: 3, maxItems: 5, items: sourcedTextSchema },
-          what_we_dont_know: { type: 'array', minItems: 3, maxItems: 5, items: sourcedTextSchema },
+          what_we_know: { type: 'array', minItems: concise ? 0 : 3, maxItems: concise ? 0 : 5, items: sourcedTextSchema },
+          what_we_dont_know: { type: 'array', minItems: concise ? 0 : 3, maxItems: concise ? 3 : 5, items: sourcedTextSchema },
           seo_title: { type: 'string' },
           seo_description: { type: 'string' },
         },

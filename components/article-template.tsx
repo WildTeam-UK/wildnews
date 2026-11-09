@@ -28,6 +28,7 @@ export type ArticleText = string | { text: string; sourceIds?: string[]; links?:
 type ArticleSource = { id?: string; recordId?: string; name: string; title?: string; url: string; primary?: boolean };
 
 export type ArticleTemplateData = {
+  templateVersion?: 2 | 3;
   topics: string[];
   discoveryTags?: { name: string; slug: string }[];
   headline: string;
@@ -131,8 +132,8 @@ export function ArticleTemplate({ article, storyId, sharePath }: { article: Arti
         <section className="story-section"><h2>What you need to know</h2><ul className="key-points">{article.keyTakeaways.map((point, index) => <li key={`takeaway-${index}`}><ArticleTextContent value={point} sources={sourcesById} storyId={storyId} /></li>)}</ul></section>
         <section className="story-section"><h2>Why this matters</h2><p className="story-explainer"><ArticleTextContent value={article.whyItMatters} sources={sourcesById} storyId={storyId} /></p></section>
         {articleTextValue(article.whatHappensNext) ? <section className="story-section"><h2>What happens next</h2><p className="story-explainer"><ArticleTextContent value={article.whatHappensNext} sources={sourcesById} storyId={storyId} /></p></section> : null}
-        <section className="story-section"><h2>What we know</h2><ul className="evidence-points">{article.whatWeKnow.map((point, index) => <li key={`known-${index}`}><ArticleTextContent value={point} sources={sourcesById} storyId={storyId} /></li>)}</ul></section>
-        <section className="story-section"><h2>What we don&apos;t know</h2><ul className="evidence-points">{article.whatWeDontKnow.map((point, index) => <li key={`unknown-${index}`}><ArticleTextContent value={point} sources={sourcesById} storyId={storyId} /></li>)}</ul></section>
+        {article.templateVersion !== 3 ? <section className="story-section"><h2>What we know</h2><ul className="evidence-points">{article.whatWeKnow.map((point, index) => <li key={`known-${index}`}><ArticleTextContent value={point} sources={sourcesById} storyId={storyId} /></li>)}</ul></section> : null}
+        {article.templateVersion !== 3 || article.whatWeDontKnow.length ? <section className="story-section"><h2>{article.templateVersion === 3 ? "What's still unclear" : "What we don't know"}</h2><ul className="evidence-points">{article.whatWeDontKnow.map((point, index) => <li key={`unknown-${index}`}><ArticleTextContent value={point} sources={sourcesById} storyId={storyId} /></li>)}</ul></section> : null}
         <section className="story-section" id="sources"><h2>Read the reporting</h2><p className="source-transparency-note">This WildNews briefing synthesises and summarises reporting from the sources below. WildNews did not produce the original reporting. <a href="/how-we-use-ai">Learn more about how we use AI <ArrowRight /></a></p><div className="source-list">{article.sources.map((source, index) => storyId && source.recordId ? <TrackedInteractionLink href={source.url} target="_blank" rel="noopener noreferrer" storyId={storyId} storySourceId={source.recordId} eventType="outbound_source" key={`${source.url}-${index}`} title={source.title}><span>{source.primary ? 'Primary story' : 'Also covering'}</span><strong>{source.name}</strong><ExternalLink /></TrackedInteractionLink> : <a href={source.url} target="_blank" rel="noopener noreferrer" key={`${source.url}-${index}`} title={source.title}><span>{source.primary ? 'Primary story' : 'Also covering'}</span><strong>{source.name}</strong><ExternalLink /></a>)}</div></section>
         {storyId ? <ContentFeedback storyId={storyId} contentLabel="story" /> : null}
       </div>

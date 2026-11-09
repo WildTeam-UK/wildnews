@@ -6,6 +6,7 @@ import { queueReadyDrafts } from '@/lib/publication-queue';
 import { normalizeEditorialTopics } from '@/lib/taxonomy';
 import { articleLinkRows } from '@/lib/article-linking';
 import { isUuid } from '@/lib/validation';
+import { articleBodyText } from '@/lib/article-structure';
 
 export const dynamic = 'force-dynamic';
 
@@ -27,8 +28,8 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
   const validSourceIds = new Set((metadata.source_ids ?? []).flatMap((source) => source.id ? [source.id] : []));
 
   try {
-    const content = cleanDraftContent({ ...body.content, topics: normalizeEditorialTopics(body.content.topics ?? []) }, validSourceIds);
     const previousContent = metadata.article_content as Partial<StoryDraftContent> | undefined;
+    const content = cleanDraftContent({ ...body.content, template_version: previousContent?.template_version === 3 ? 3 : 2, topics: normalizeEditorialTopics(body.content.topics ?? []) }, validSourceIds);
     const selectedNewUnsplashImage = content.image_credit?.provider === 'unsplash' && content.image_credit.source_id !== previousContent?.image_credit?.source_id;
     const taxonomyReady = content.topics.length > 0;
     const currentClassification = (metadata.topic_classification ?? {}) as Record<string, unknown>;
@@ -42,7 +43,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
       headline: content.headline,
       standfirst: content.standfirst,
       overview: content.story_at_a_glance.map((item) => item.text).join('\n\n'),
-      body: [`Why this matters\n${content.why_it_matters.text}`, `What happens next\n${content.what_happens_next.text}`, `What we know\n${content.what_we_know.map((item) => item.text).join('\n')}`, `What we don't know\n${content.what_we_dont_know.map((item) => item.text).join('\n')}`].join('\n\n'),
+      body: articleBodyText(content),
       key_takeaways: content.key_takeaways,
       why_it_matters: content.why_it_matters.text,
       agreed_points: content.what_we_know,

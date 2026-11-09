@@ -30,8 +30,8 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     if (!revision) return Response.json({ error: 'Editorial revision not found.' }, { status: 404 });
     if (revision.status !== 'draft') return Response.json({ error: 'Only a draft revision can be edited.' }, { status: 409 });
     const validSourceIds = new Set(((revision.source_list ?? []) as StoredSource[]).flatMap((source) => source.id ? [source.id] : []));
-    const content = cleanDraftContent({ ...body.content, topics: normalizeEditorialTopics(body.content.topics ?? []) }, validSourceIds);
     const baseContent = revision.base_content as StoryDraftContent;
+    const content = cleanDraftContent({ ...body.content, template_version: baseContent.template_version === 3 ? 3 : 2, topics: normalizeEditorialTopics(body.content.topics ?? []) }, validSourceIds);
     const { error } = await supabase.from('story_editorial_revisions').update({ proposed_content: content, public_content_changed: revisionChangesPublicContent(baseContent, content) }).eq('id', id).eq('status', 'draft');
     if (error) throw error;
     return Response.json({ saved: true });
