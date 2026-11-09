@@ -154,11 +154,11 @@ The admin surface standardises card borders and shadows through `--admin-card-bo
 
 ### Navigation
 
-`SiteNavigation` is sticky through its containing header. Desktop height is approximately 94px. It contains the WILDNEWS wordmark, primary links, an outlined “How we use AI” action and the highlighted Good News action. At 820px and below it becomes a full-width dropdown controlled by a hamburger button.
+`SiteNavigation` is sticky through its containing header and uses the approved WildTeam navigation from the Jobs experiment. Jobs, News, Training and About have accessible dropdowns; News has the active pink underline. The menus sit to the right before the 160px Good News action, with its brand icon and reduced-motion-aware shine. Sign-in is hidden. At 900px and below it becomes a full-width dropdown controlled by a hamburger button. How we use AI is linked under About in the footer.
 
 `InteriorHeader` reuses the same public navigation on interior pages.
 
-The Jobs navigation link opens the independent WildJobs directory at `https://jobs.wildteam.org.uk/` in a new tab.
+Navigation links lead directly to the canonical Jobs, News, Training and WildTeam destinations in the same tab.
 
 ### Editorial heroes
 
