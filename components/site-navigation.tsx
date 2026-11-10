@@ -8,6 +8,24 @@ import styles from './site-navigation.module.css';
 
 const navigation = [
   {
+    label: 'Training',
+    href: 'https://training.wildteam.org.uk/',
+    links: [
+      [
+        'Explore all courses',
+        'https://training.wildteam.org.uk/courses',
+        'book',
+      ],
+      ['Memberships', 'https://training.wildteam.org.uk/memberships', 'badge'],
+      ['Bursaries', 'https://training.wildteam.org.uk/bursaries', 'gift'],
+      [
+        'Training for teams',
+        'https://training.wildteam.org.uk/pricing-teams',
+        'users',
+      ],
+    ],
+  },
+  {
     label: 'Jobs',
     href: 'https://jobs.wildteam.org.uk/',
     links: [
@@ -40,24 +58,6 @@ const navigation = [
         'Daily and weekly digests',
         'https://news.wildteam.org.uk/digests',
         'mail',
-      ],
-    ],
-  },
-  {
-    label: 'Training',
-    href: 'https://training.wildteam.org.uk/',
-    links: [
-      [
-        'Explore all courses',
-        'https://training.wildteam.org.uk/courses',
-        'book',
-      ],
-      ['Memberships', 'https://training.wildteam.org.uk/memberships', 'badge'],
-      ['Bursaries', 'https://training.wildteam.org.uk/bursaries', 'gift'],
-      [
-        'Training for teams',
-        'https://training.wildteam.org.uk/pricing-teams',
-        'users',
       ],
     ],
   },
