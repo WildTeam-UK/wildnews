@@ -3,7 +3,7 @@ import { stripSourceMarkers } from '@/lib/article-text';
 import { publicationChecks } from '@/lib/publishing';
 import { getSupabaseAdminClient } from '@/lib/supabase/admin';
 import { runTaxonomyGovernance } from '@/lib/taxonomy-governance';
-import { londonDateTimeParts, londonLocalDateTimeToUtc } from '@/lib/london-time';
+import { isSameLondonDay, londonDateTimeParts, londonLocalDateTimeToUtc } from '@/lib/london-time';
 import { planSameDayPublicationTimes, remainingDailyArticleCapacity } from '@/lib/publication-planning';
 import { invalidatePublicPages } from '@/lib/invalidate-public-pages';
 
@@ -66,17 +66,29 @@ type RebalanceOptions = {
   storyId?: string | null;
 };
 
-export async function remainingPublicationCapacityToday(target: number) {
-  const supabase = getSupabaseAdminClient();
+export async function remainingPublicationCapacityToday(target: number, sourceRunId: string | null = null) {
   const bounds = londonDayBounds(new Date());
-  const { count, error } = await supabase
-    .from('publication_queue')
-    .select('id', { count: 'exact', head: true })
-    .in('status', ['scheduled', 'publishing', 'published'])
-    .gte('scheduled_for', new Date(bounds.start).toISOString())
-    .lt('scheduled_for', new Date(bounds.end).toISOString());
-  if (error) throw error;
-  return remainingDailyArticleCapacity(target, Number(count ?? 0));
+  const occupied = await occupiedArticlesToday(new Date(bounds.start).toISOString(), new Date(bounds.end).toISOString());
+  if (sourceRunId) {
+    // Resumed runs count their own completed drafts in the runner. Do not also
+    // subtract those stories as external reservations after a budget handoff.
+    const { data: items, error } = await getSupabaseAdminClient().from('editorial_run_items')
+      .select('story_id').eq('run_id', sourceRunId).not('story_id', 'is', null);
+    if (error) throw error;
+    for (const item of items ?? []) occupied.delete(item.story_id);
+  }
+  return remainingDailyArticleCapacity(target, occupied.size);
+}
+
+async function occupiedArticlesToday(dayStart: string, dayEnd: string) {
+  const supabase = getSupabaseAdminClient();
+  const [{ data: queued, error: queueError }, { data: published, error: publishedError }] = await Promise.all([
+    supabase.from('publication_queue').select('story_id').in('status', ['scheduled', 'publishing', 'published']).gte('scheduled_for', dayStart).lt('scheduled_for', dayEnd),
+    supabase.from('stories').select('id').eq('status', 'published').eq('content_type', 'news').gte('published_at', dayStart).lt('published_at', dayEnd),
+  ]);
+  if (queueError) throw queueError;
+  if (publishedError) throw publishedError;
+  return new Set([...(queued ?? []).map((item) => item.story_id), ...(published ?? []).map((item) => item.id)]);
 }
 
 export async function rebalancePublicationQueue(options: RebalanceOptions = {}) {
@@ -108,17 +120,18 @@ export async function rebalancePublicationQueue(options: RebalanceOptions = {}) 
   }
 
   let pendingQuery = supabase.from('publication_queue').select('id, story_id, status, priority_rank, scheduled_for, attempt_count, created_at').eq('status', 'queued').order('priority_rank', { ascending: true, nullsFirst: false }).order('created_at');
+  // A bulk rebalance must not turn yesterday's unused queue into today's backlog.
+  if (!options.storyId) pendingQuery = pendingQuery.gte('created_at', dayStart).lt('created_at', dayEnd);
   if (options.sourceRunId) pendingQuery = pendingQuery.eq('source_run_id', options.sourceRunId);
   else if (options.storyId) pendingQuery = pendingQuery.eq('story_id', options.storyId);
   else if (movableIds.length) pendingQuery = pendingQuery.in('id', movableIds);
   else return { scheduled: 0 };
 
-  const [{ data: pending, error: pendingError }, { data: fixed, error: fixedError }] = await Promise.all([
+  const [{ data: pending, error: pendingError }, occupied] = await Promise.all([
     pendingQuery,
-    supabase.from('publication_queue').select('id, story_id, status, priority_rank, scheduled_for, attempt_count, created_at').in('status', ['scheduled', 'publishing', 'published']).gte('scheduled_for', dayStart).lt('scheduled_for', dayEnd),
+    occupiedArticlesToday(dayStart, dayEnd),
   ]);
   if (pendingError) throw pendingError;
-  if (fixedError) throw fixedError;
   const queue = (pending ?? []) as QueueRow[];
   if (!queue.length) return { scheduled: 0 };
 
@@ -135,7 +148,7 @@ export async function rebalancePublicationQueue(options: RebalanceOptions = {}) 
     windowStart: start,
     windowEnd: end,
     target: settings.max_new_drafts,
-    occupied: fixed?.length ?? 0,
+    occupied: occupied.size,
   });
   const updates = queue.slice(0, scheduledTimes.length).map((row, index) => {
     const scheduledFor = scheduledTimes[index];
@@ -151,6 +164,11 @@ export async function queueReadyDrafts(sourceRunId: string | null = null, onlySt
   const supabase = getSupabaseAdminClient();
   const settings = await getSettings();
   if (!settings.auto_publish_enabled && !allowWhenPaused) return { queued: 0, held: 0, scheduled: 0 };
+  if (sourceRunId) {
+    const { data: run, error } = await supabase.from('editorial_runs').select('started_at').eq('id', sourceRunId).single();
+    if (error) throw error;
+    if (!isSameLondonDay(new Date(run.started_at), new Date())) return { queued: 0, held: 0, scheduled: 0 };
+  }
 
   const { data: runItems, error: runItemsError } = sourceRunId
     ? await supabase.from('editorial_run_items').select('story_id, rank').eq('run_id', sourceRunId).not('story_id', 'is', null)
@@ -166,6 +184,10 @@ export async function queueReadyDrafts(sourceRunId: string | null = null, onlySt
     .order('created_at');
   if (onlyStoryId) storyQuery = storyQuery.eq('id', onlyStoryId);
   else if (sourceRunId) storyQuery = storyQuery.in('id', runStoryIds);
+  else {
+    const bounds = londonDayBounds(new Date());
+    storyQuery = storyQuery.gte('created_at', new Date(bounds.start).toISOString()).lt('created_at', new Date(bounds.end).toISOString());
+  }
   const { data: stories, error: storiesError } = await storyQuery;
   if (storiesError) throw storiesError;
   if (!stories?.length) return { queued: 0, held: 0, scheduled: 0 };

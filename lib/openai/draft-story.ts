@@ -233,7 +233,7 @@ async function uniqueSlug(headline: string) {
   return `${base}-${Date.now()}`;
 }
 
-export async function generateStoryDraft(clusterId: string, userId: string | null): Promise<DraftResult> {
+export async function generateStoryDraft(clusterId: string, userId: string | null, options: { beforeSave?: () => Promise<void> } = {}): Promise<DraftResult> {
   const supabase = getSupabaseAdminClient();
   const { data: existing, error: existingError } = await supabase.from('stories').select('id, headline, generation_metadata').eq('cluster_id', clusterId).maybeSingle();
   if (existingError) throw existingError;
@@ -426,6 +426,7 @@ This is a private first draft for human review, never a finished or published ar
     } : null,
   };
   const body = articleBodyText(content);
+  await options.beforeSave?.();
   const { data: story, error: storyError } = await supabase.from('stories').insert({
     cluster_id: clusterId,
     slug,

@@ -21,6 +21,12 @@ export function londonDateTimeParts(date: Date) {
   };
 }
 
+export function isSameLondonDay(left: Date, right: Date) {
+  const a = londonDateTimeParts(left);
+  const b = londonDateTimeParts(right);
+  return a.year === b.year && a.month === b.month && a.day === b.day;
+}
+
 export function londonLocalDateTimeToUtc(year: number, month: number, day: number, hour = 0, minute = 0, second = 0) {
   const target = Date.UTC(year, month - 1, day, hour, minute, second);
   let timestamp = target;
