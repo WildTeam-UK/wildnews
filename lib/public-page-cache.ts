@@ -1,8 +1,8 @@
 export const PUBLIC_PAGE_TAG = 'wildnews-public-pages-v1';
 export const PUBLIC_PAGE_FAILURE = 'data-public-page-unavailable';
 export const PUBLIC_PAGE_DEGRADED = 'data-public-page-degraded';
-const FRESH_MS = 60_000;
-const MAX_AGE_MS = 300_000;
+const FRESH_MS = 300_000;
+const MAX_AGE_MS = 600_000;
 const MAX_BODY_BYTES = 1_800_000;
 
 export type PageCacheStore = {

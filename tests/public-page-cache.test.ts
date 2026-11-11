@@ -51,10 +51,10 @@ void test('a simultaneous GET and HEAD burst share one anonymous render', async 
   assert.equal(f.renders(), 1);
 });
 
-void test('last successful content survives refresh failure but expires after five minutes', async () => {
+void test('last successful content survives refresh failure but expires after ten minutes', async () => {
   const f = fixture();
   await f.cache.serve(request());
-  f.advance(61_000);
+  f.advance(301_000);
   f.renderWith(async () => html('<main data-public-page-unavailable>Unavailable</main>'));
   const stale = await f.cache.serve(request());
   assert.equal(stale?.headers.get('X-WildNews-Cache'), 'STALE');
@@ -62,8 +62,24 @@ void test('last successful content survives refresh failure but expires after fi
   await Promise.all(f.background);
   assert.ok(f.reports.includes('public_page_render_failed'));
   assert.ok(f.entries.has('render-failure'));
-  f.advance(240_000);
+  f.advance(300_000);
   assert.equal((await f.cache.serve(request()))?.status, 503);
+});
+
+void test('five minutes of public visits reuse one render and CDN freshness never extends it', async () => {
+  const f = fixture();
+  await f.cache.serve(request());
+  for (let minute = 1; minute < 5; minute++) {
+    f.advance(60_000);
+    const response = await f.cache.serve(request());
+    assert.equal(response?.headers.get('X-WildNews-Cache'), 'HIT');
+    assert.equal(response?.headers.get('Vercel-CDN-Cache-Control'), `public, max-age=${300 - minute * 60}`);
+  }
+  assert.equal(f.renders(), 1);
+  f.advance(60_000);
+  assert.equal((await f.cache.serve(request()))?.headers.get('X-WildNews-Cache'), 'STALE');
+  await Promise.all(f.background);
+  assert.equal(f.renders(), 2);
 });
 
 void test('an error boundary returned with HTTP 200 is converted to 503 and never cached', async () => {
