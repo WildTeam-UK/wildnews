@@ -1,7 +1,7 @@
 import { timingSafeEqual } from 'node:crypto';
 import { processAutomatedCoverageUpdates } from '@/lib/coverage-revision-workflow';
 import { environmentValue } from '@/lib/environment';
-import { advanceEditorialRun } from '@/lib/editorial-runner';
+import { advanceEditorialRun, recoverEditorialRunPublication } from '@/lib/editorial-runner';
 import { collectEnabledSources, continueActiveCollection } from '@/lib/ingestion/rss';
 import { generateDigest } from '@/lib/openai/generate-digest';
 import { processClaimedDigestDelivery } from '@/lib/digest-distribution';
@@ -65,6 +65,7 @@ export async function POST(request: Request) {
 
   const supabase = getSupabaseAdminClient();
   try {
+    await recoverEditorialRunPublication();
     const { data: duePublication, error: publicationClaimError } = await supabase.rpc('claim_due_publication');
     if (publicationClaimError) throw publicationClaimError;
     const publication = duePublication ? await publishClaimedQueueItem(duePublication) : null;

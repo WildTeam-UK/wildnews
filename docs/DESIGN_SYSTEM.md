@@ -154,7 +154,7 @@ The admin surface standardises card borders and shadows through `--admin-card-bo
 
 ### Navigation
 
-`SiteNavigation` is sticky through its containing header and uses the approved WildTeam navigation from the Jobs experiment. Jobs, News, Training and About have accessible dropdowns; News has the active pink underline. The menus sit to the right before the 160px Good News action, with its brand icon and reduced-motion-aware shine. Sign-in is hidden. At 900px and below it becomes a full-width dropdown controlled by a hamburger button. How we use AI is linked under About in the footer.
+`SiteNavigation` is sticky through its containing header and uses the approved WildTeam navigation from the Jobs experiment. Training, Jobs, News and About have accessible dropdowns; News has the active pink underline. The menus sit beside the brand on the left, matching Training, while the 160px Good News action stays on the right with its brand icon and reduced-motion-aware shine. The brand links to the WildNews homepage; there is no public sign-in or account menu. At 900px and below it becomes a full-width dropdown controlled by a hamburger button, with the Good News action filling the available width. How we use AI is linked under About in the footer.
 
 `InteriorHeader` reuses the same public navigation on interior pages.
 
