@@ -220,6 +220,7 @@
 }
 .mobileToggle {
   display: none;
+  cursor: pointer;
 }
 @media (min-width: 901px) {
   /* Equal side columns keep the menu centred on the page. */
