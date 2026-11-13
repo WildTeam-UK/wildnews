@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { bufferChannelIds, createBufferPost, type BufferPostPayload } from '@/lib/distribution/buffer';
 import { brevoCampaignIsSubmitted, createBrevoCampaign, sendBrevoCampaign, type BrevoCampaignPayload } from '@/lib/distribution/brevo';
 import { SOCIAL_EDITORIAL_DESTINATION } from '@/lib/distribution/constants';
+import { assertSocialPostingWindow, SocialPostingWindowExpired } from '@/lib/distribution/social-window';
 import { buildEmailDistributionPayload, buildSocialDistributionPayload } from '@/lib/distribution/digest-content';
 import { DistributionProviderError } from '@/lib/distribution/errors';
 import { digestPath, type DigestContent, type DigestSourceStory, type DigestType } from '@/lib/digests';
@@ -11,7 +12,7 @@ import { absoluteUrl } from '@/lib/seo';
 import { getSupabaseAdminClient } from '@/lib/supabase/admin';
 
 type DeliveryProvider = 'buffer' | 'brevo';
-type DeliveryStatus = 'pending' | 'processing' | 'submitted' | 'completed' | 'failed' | 'uncertain' | 'cancelled';
+type DeliveryStatus = 'pending' | 'processing' | 'submitted' | 'completed' | 'failed' | 'uncertain' | 'cancelled' | 'unsent';
 
 type DeliveryRecord = {
   id: string;
@@ -115,9 +116,10 @@ async function prepareSocialEditorialDeliveries(delivery: DeliveryRecord) {
   const [{ data: settings, error: settingsError }, { data: story, error: storyError }, { data: run, error: runError }] = await Promise.all([
     supabase.from('digest_settings').select('social_distribution_enabled, max_estimated_cost_usd').eq('id', true).single(),
     supabase.from('stories').select('id, slug, status, content_type, image_url, generation_metadata').eq('id', delivery.story_id).single(),
-    supabase.from('digest_runs').select('id, estimated_cost_usd, social_copy').eq('id', delivery.run_id).single(),
+    supabase.from('digest_runs').select('id, period_end, estimated_cost_usd, social_copy').eq('id', delivery.run_id).single(),
   ]);
   if (settingsError || storyError || runError || !settings || !story || !run) throw settingsError ?? storyError ?? runError ?? new Error('Social editorial preparation could not be loaded.');
+  assertSocialPostingWindow(run.period_end);
   if (!settings.social_distribution_enabled) throw new SocialEditorialValidationError('Social distribution is no longer enabled.');
   if (story.status !== 'published' || !['daily_digest', 'weekly_digest'].includes(story.content_type)) throw new SocialEditorialValidationError('Social editorial copy can only be generated from a published digest.');
   const digestStory = story as DigestStory;
@@ -187,6 +189,9 @@ async function prepareSocialEditorialDeliveries(delivery: DeliveryRecord) {
     if (copyError) throw copyError;
   }
 
+  // A slow generation may finish after its posting window. Keep its audit copy
+  // but never create a backlog of provider deliveries from it.
+  assertSocialPostingWindow(run.period_end);
   const rows = channels.map((channelId) => {
     const id = randomUUID();
     const payload = buildSocialDistributionPayload({ deliveryId: id, text: text!, publicUrl, imageUrl: digestStory.image_url, mode });
@@ -267,15 +272,18 @@ export async function prepareDigestDistributions(runId: string, storyId: string)
 
 export async function refreshDigestDistributionStatus(runId: string) {
   const supabase = getSupabaseAdminClient();
-  const { data, error } = await supabase.from('digest_deliveries').select('provider, status').eq('run_id', runId);
+  const { data, error } = await supabase.from('digest_deliveries').select('provider, destination, status').eq('run_id', runId);
   if (error) throw error;
-  const deliveries = (data ?? []) as Array<{ provider: DeliveryProvider; status: DeliveryStatus }>;
+  const deliveries = (data ?? []) as Array<{ provider: DeliveryProvider; destination: string; status: DeliveryStatus }>;
   const summarize = (provider: DeliveryProvider) => {
-    const statuses = deliveries.filter((item) => item.provider === provider).map((item) => item.status);
+    const providerRows = deliveries.filter((item) => item.provider === provider);
+    const destinations = providerRows.filter((item) => item.destination !== SOCIAL_EDITORIAL_DESTINATION);
+    const statuses = (provider === 'buffer' && destinations.length ? destinations : providerRows).map((item) => item.status);
     if (!statuses.length) return null;
-    if (statuses.every((status) => status === 'cancelled')) return 'disabled';
+    if (statuses.every((status) => status === 'unsent' || status === 'cancelled')) return statuses.includes('unsent') ? 'unsent' : 'disabled';
     if (statuses.every((status) => status === 'submitted' || status === 'completed' || status === 'cancelled')) return provider === 'buffer' ? 'queued' : 'scheduled';
     if (statuses.some((status) => status === 'failed' || status === 'uncertain')) return provider === 'buffer' && statuses.some((status) => status === 'submitted' || status === 'completed') ? 'partial' : 'failed';
+    if (statuses.includes('unsent') && !statuses.some((status) => status === 'pending' || status === 'processing')) return 'partial';
     return 'pending';
   };
   const socialStatus = summarize('buffer');
@@ -288,6 +296,7 @@ export async function refreshDigestDistributionStatus(runId: string) {
   };
   if (socialStatus) update.social_status = socialStatus;
   if (emailStatus) update.email_status = emailStatus;
+  if (!hasProblem) update.error_summary = null;
   await supabase.from('digest_runs').update(update).eq('id', runId);
 }
 
@@ -302,7 +311,7 @@ export async function processClaimedDigestDelivery(deliveryId: string, leaseToke
       try {
         prepared = await prepareSocialEditorialDeliveries(delivery);
       } catch (error) {
-        if (error instanceof DistributionProviderError) throw error;
+        if (error instanceof DistributionProviderError || error instanceof SocialPostingWindowExpired) throw error;
         throw new DistributionProviderError(safeError(error), error instanceof SocialEditorialValidationError ? 'rejected' : 'retryable');
       }
       const completedAt = new Date().toISOString();
@@ -317,6 +326,9 @@ export async function processClaimedDigestDelivery(deliveryId: string, leaseToke
     let providerReference = delivery.provider_reference;
     if (delivery.provider === 'buffer') {
       if (!providerReference) {
+        const { data: run, error: runError } = await supabase.from('digest_runs').select('period_end').eq('id', delivery.run_id).single();
+        if (runError || !run) throw runError ?? new Error('The social posting window could not be verified.');
+        assertSocialPostingWindow(run.period_end);
         providerReference = await createBufferPost(delivery.destination, delivery.payload as unknown as BufferPostPayload);
         const { error: referenceError } = await supabase.from('digest_deliveries').update({ provider_reference: providerReference }).eq('id', delivery.id).eq('lease_token', leaseToken);
         if (referenceError) throw referenceError;
@@ -337,6 +349,15 @@ export async function processClaimedDigestDelivery(deliveryId: string, leaseToke
     await refreshDigestDistributionStatus(delivery.run_id);
     return { provider: delivery.provider, destination: delivery.destination, providerReference };
   } catch (error) {
+    if (error instanceof SocialPostingWindowExpired) {
+      const { error: expiryError } = await supabase.from('digest_deliveries').update({
+        status: 'unsent', last_error: error.message, completed_at: new Date().toISOString(), lease_token: null, lease_expires_at: null,
+      }).eq('id', delivery.id).eq('lease_token', leaseToken).eq('status', 'processing');
+      if (expiryError) throw expiryError;
+      await supabase.from('digest_run_events').insert({ run_id: delivery.run_id, stage: 'distribution', level: 'info', message: error.message, details: { provider: 'buffer', delivery_id: delivery.id } });
+      await refreshDigestDistributionStatus(delivery.run_id);
+      return { provider: delivery.provider, destination: delivery.destination, status: 'unsent' };
+    }
     const providerError = error instanceof DistributionProviderError ? error : new DistributionProviderError(safeError(error), 'uncertain');
     const retryable = providerError.outcome === 'retryable' && delivery.attempt_count < 3;
     const status = retryable ? 'pending' : providerError.outcome === 'uncertain' ? 'uncertain' : 'failed';

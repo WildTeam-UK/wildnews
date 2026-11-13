@@ -6,7 +6,7 @@ import { getOpenAIClient } from './client';
 
 const MODEL = 'gpt-6-luna';
 export const SOCIAL_GENERATION_PROMPT_VERSION = 'social-editor-v4';
-export const SOCIAL_REVIEW_PROMPT_VERSION = 'social-review-v5';
+export const SOCIAL_REVIEW_PROMPT_VERSION = 'social-review-v6';
 
 export class SocialEditorialValidationError extends Error {}
 
@@ -33,11 +33,14 @@ export type SocialPostDraft = {
   hashtags: string[];
 };
 
-type SocialReview = {
+type SupportedParagraph = { text: string; story_ids: string[] };
+export type SocialReview = {
   decision: 'approved' | 'revised' | 'rejected';
   issues: string[];
-  post: SocialPostDraft;
-  claim_support: Array<{ claim: string; story_ids: string[] }>;
+  post: Omit<SocialPostDraft, 'opening' | 'paragraphs'> & {
+    opening: SupportedParagraph;
+    paragraphs: SupportedParagraph[];
+  };
 };
 
 export type SocialEditorialInput = {
@@ -91,6 +94,35 @@ function cleanDraft(draft: SocialPostDraft): SocialPostDraft {
     paragraphs: draft.paragraphs.map((paragraph) => cleanAiText(paragraph).trim()).filter(Boolean),
     hashtags: [...new Set(draft.hashtags.map((hashtag) => hashtag.trim()))],
   };
+}
+
+export function socialReviewPostSchema(type: DigestType, storyIds: string[]) {
+  const post = postSchema(type, storyIds);
+  const paragraph = {
+    type: 'object',
+    properties: {
+      text: { type: 'string' },
+      story_ids: { type: 'array', minItems: 1, items: { type: 'string', enum: storyIds } },
+    },
+    required: ['text', 'story_ids'],
+    additionalProperties: false,
+  } as const;
+  return { ...post, properties: {
+    ...post.properties,
+    opening: paragraph,
+    paragraphs: { type: 'array', minItems: 2, maxItems: 6, items: paragraph },
+  } };
+}
+
+export function reviewedSocialPost(review: SocialReview) {
+  const draft = cleanDraft({ ...review.post, opening: review.post.opening.text,
+    paragraphs: review.post.paragraphs.map((paragraph) => paragraph.text) });
+  // Bind evidence to its paragraph structurally. Separate model-written arrays
+  // could omit a paragraph, duplicate another, or quote an earlier draft.
+  const claimSupport = [review.post.opening, ...review.post.paragraphs].map((paragraph) => ({
+    claim: cleanAiText(paragraph.text).trim(), story_ids: [...new Set(paragraph.story_ids)],
+  }));
+  return { draft, claimSupport };
 }
 
 function words(value: string) {
@@ -229,7 +261,7 @@ Check the draft against the final published digest, the supplied source-story ev
 
 Every factual claim must be supported by the supplied evidence. Do not add outside knowledge. Preserve uncertainty exactly. A promising intervention is not a proven success, a proposal is not an outcome, and an allegation is not a finding. Reject the post if it cannot be made accurate from the evidence.
 
-You may return the draft unchanged as approved, or revise it to fix a real defect. A revision may only rephrase, remove or reorganise evidence already supplied. It must not add facts. Record concise issues that caused a revision. Create one claim_support entry for every factual opening or body paragraph in the final post. In each entry, copy the complete final paragraph verbatim into claim and provide every source-story ID that supports that paragraph. Do not summarise, paraphrase, label or combine paragraphs in claim_support. Hashtags do not need claim-support entries.
+You may return the draft unchanged as approved, or revise it to fix a real defect. A revision may only rephrase, remove or reorganise evidence already supplied. It must not add facts. Record concise issues that caused a revision. Return the opening and each body paragraph as an object with text and story_ids. Put the complete final paragraph in text and every supplied source-story ID that supports it in story_ids. This includes thematic opening and concluding paragraphs: cite the stories from which that synthesis follows. Never invent support for a paragraph; revise or reject unsupported copy. Hashtags do not need claim-support entries.
 
 Keep the same output constraints: professional British English, aim for the requested editorial word range but never exceed 300 words, no Markdown, no URL, no image attribution, no em dash, no relative date language, two or three hashtags including #WildNews, and a useful post rather than a digest announcement. Require the opening and every body paragraph to begin with exactly one relevant, non-reaction emoji followed by a space. Every paragraph must use a different emoji grounded in that paragraph's subject. An emoji in the middle or at the end is invalid. Never default to 🔥, and retain it only for a paragraph specifically about fire, wildfire or burning. Remove or replace any emoji that is tonally inappropriate, playful about harm, generic, repeated or unrelated to its paragraph. The application supplies the 📰 digest invitation, so the post must not add one. Return only the requested structured data.`);
 
@@ -279,10 +311,9 @@ export async function generateSocialEditorial(input: SocialEditorialInput): Prom
         properties: {
           decision: { type: 'string', enum: ['approved', 'revised', 'rejected'] },
           issues: { type: 'array', items: { type: 'string' } },
-          post: postSchema(input.type, storyIds),
-          claim_support: { type: 'array', minItems: 1, items: { type: 'object', properties: { claim: { type: 'string' }, story_ids: { type: 'array', minItems: 1, items: { type: 'string', enum: storyIds } } }, required: ['claim', 'story_ids'], additionalProperties: false } },
+          post: socialReviewPostSchema(input.type, storyIds),
         },
-        required: ['decision', 'issues', 'post', 'claim_support'],
+        required: ['decision', 'issues', 'post'],
         additionalProperties: false,
       },
     } },
@@ -290,14 +321,14 @@ export async function generateSocialEditorial(input: SocialEditorialInput): Prom
   if (!review.output_text) throw new Error('OpenAI returned no social editorial review.');
   const reviewed = parseAiJson<SocialReview>(review.output_text);
   if (reviewed.decision === 'rejected') throw new SocialEditorialValidationError(`Social editorial review rejected the post.${reviewed.issues.length ? ` ${reviewed.issues.join(' ')}` : ''}`);
-  const finalDraft = cleanDraft(reviewed.post);
+  const { draft: finalDraft, claimSupport } = reviewedSocialPost(reviewed);
   const reviewIssues = validateSocialPostDraft(finalDraft, input);
-  const supportedIds = new Set(reviewed.claim_support.flatMap((item) => item.story_ids));
+  const supportedIds = new Set(claimSupport.flatMap((item) => item.story_ids));
   const factualProseParts = [finalDraft.opening, ...finalDraft.paragraphs];
-  if (reviewed.claim_support.length < finalDraft.paragraphs.length + 1) reviewIssues.push('The editorial review did not provide support for every factual paragraph.');
+  if (claimSupport.length !== finalDraft.paragraphs.length + 1 || claimSupport.some((item) => !item.story_ids.length)) reviewIssues.push('The editorial review did not provide support for every factual paragraph.');
   if (finalDraft.featured_story_ids.some((id) => !supportedIds.has(id))) reviewIssues.push('The editorial review did not map every featured story to a factual claim.');
-  if (reviewed.claim_support.some((item) => !item.claim.trim() || item.story_ids.some((id) => !storyIds.includes(id)))) reviewIssues.push('The editorial review returned invalid claim-support evidence.');
-  if (reviewed.claim_support.some((item) => !socialClaimMatchesProse(item.claim, factualProseParts))) reviewIssues.push('The editorial review returned claim support that does not sufficiently match the final post.');
+  if (claimSupport.some((item) => !item.claim.trim() || item.story_ids.some((id) => !storyIds.includes(id)))) reviewIssues.push('The editorial review returned invalid claim-support evidence.');
+  if (claimSupport.some((item, index) => item.claim !== factualProseParts[index])) reviewIssues.push('The editorial review returned claim support that does not sufficiently match the final post.');
   if (reviewIssues.length) throw new SocialEditorialValidationError(`Reviewed social post validation failed: ${reviewIssues.join(' ')}`);
 
   const text = renderSocialPost(finalDraft, input);
@@ -312,7 +343,7 @@ export async function generateSocialEditorial(input: SocialEditorialInput): Prom
     hashtags: finalDraft.hashtags,
     reviewDecision: reviewed.decision,
     reviewIssues: reviewed.issues.map((issue) => cleanAiText(issue).trim()).filter(Boolean),
-    claimSupport: reviewed.claim_support.map((item) => ({ claim: cleanAiText(item.claim).trim(), story_ids: [...new Set(item.story_ids)] })),
+    claimSupport,
     inputTokens,
     outputTokens,
     estimatedCostUsd: estimateLunaTokenCost(inputTokens, outputTokens),

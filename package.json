@@ -10,6 +10,7 @@
     "dev": "vinext dev",
     "build": "vite build",
     "test:publishing": "node --experimental-strip-types --test tests/editorial-step-lease.test.ts tests/editorial-publication-safety.test.mjs tests/editorial-workflow.test.mjs",
+    "test:automation": "node --experimental-strip-types --test tests/automation-due.test.mjs tests/social-window.test.mjs tests/social-window-clock.test.ts",
     "start": "node .output/server/index.mjs",
     "lint": "oxlint",
     "format": "oxfmt"

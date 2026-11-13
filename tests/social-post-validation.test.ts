@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { DigestContent, DigestType } from '@/lib/digests';
-import { renderSocialPost, socialClaimMatchesProse, socialDigestLinkLine, validateRenderedSocialPost, validateSocialPostDraft, type SocialEditorialInput, type SocialEvidenceStory, type SocialPostDraft } from '@/lib/openai/generate-social-post';
+import { renderSocialPost, reviewedSocialPost, socialReviewPostSchema, socialClaimMatchesProse, socialDigestLinkLine, validateRenderedSocialPost, validateSocialPostDraft, type SocialEditorialInput, type SocialEvidenceStory, type SocialPostDraft } from '@/lib/openai/generate-social-post';
 
 function content(type: DigestType): DigestContent {
   return {
@@ -32,6 +32,30 @@ function input(type: DigestType, storyCount: number): SocialEditorialInput {
     recentPosts: ['Wetland monitoring is changing how restoration teams judge progress.'],
   };
 }
+
+void test('review evidence is required inside every opening and body paragraph', () => {
+  const schema = socialReviewPostSchema('daily', ['story-1', 'story-2', 'story-3']);
+  for (const paragraph of [schema.properties.opening, schema.properties.paragraphs.items]) {
+    assert.deepEqual(paragraph.required, ['text', 'story_ids']);
+    assert.equal(paragraph.properties.story_ids.minItems, 1);
+    assert.deepEqual(paragraph.properties.story_ids.items.enum, ['story-1', 'story-2', 'story-3']);
+    assert.equal(paragraph.additionalProperties, false);
+  }
+  const { draft, claimSupport } = reviewedSocialPost({
+    decision: 'revised', issues: ['Retained uncertainty.'],
+    post: {
+      approach: 'thematic', featured_story_ids: ['story-1', 'story-2', 'story-3'],
+      opening: { text: '🌳 Evidence supports a cautious conclusion.', story_ids: ['story-1', 'story-2'] },
+      paragraphs: [
+        { text: '🔬 Tests remain preliminary.', story_ids: ['story-1'] },
+        { text: '🌊 Monitoring continues.', story_ids: ['story-2', 'story-3'] },
+      ], hashtags: ['#WildNews', '#Conservation'],
+    },
+  });
+  assert.deepEqual(claimSupport.map((item) => item.claim), [draft.opening, ...draft.paragraphs]);
+  assert.equal(claimSupport.length, 3);
+  assert.deepEqual(claimSupport[2].story_ids, ['story-2', 'story-3']);
+});
 
 void test('accepts a substantive daily editorial post', () => {
   const draft: SocialPostDraft = {

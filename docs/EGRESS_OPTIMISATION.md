@@ -24,6 +24,12 @@ On 11 November 2026 the production-server check passed: 30 warm requests added z
 
 ## Production comparison
 
+The 13 November 2026 CPU change also gates idle automation at the existing Supabase minute scheduler. Due work still wakes the same endpoint on the next minute tick, while an idle worker is probed every four minutes. `tests/automation-due.test.mjs` executes the real migration against PGlite and covers daily and digest recovery, source collection, publication handoff, coverage, retention, delivery retries, expired leases and restricted execution. The predicate changes neither the public-page cache lifetime nor the editorial/publication limits.
+
+Social review now requires each opening and body paragraph to carry its own source-story IDs in the structured response. The application constructs the stored paragraph-to-evidence map from that result, preventing an independent evidence array from omitting or mismatching a paragraph. Independent editorial review, deterministic validation, provider leases and duplicate-delivery safeguards remain in place.
+
+Unsubmitted social deliveries expire as `unsent` two hours after the digest's stored scheduled publication time (`period_end`). The minute scheduler closes pending or failed deliveries without waking Vercel solely for expiry. The worker also checks before generation and immediately before Buffer submission, and manual retries cannot reopen an expired edition. Buffer-accepted deliveries and uncertain provider outcomes retain their existing safeguards; weekly email handling is unchanged. Expiry retains an audit event and removes the failed delivery from active workflow health. The SQL and clock regression tests cover the exact deadline, idempotency, provider exceptions and restricted access.
+
 The 11 November 2026 investigation found 4.372 GB of WildNews egress in the displayed 15 October–15 November cycle, versus 2.825 GB for WildJobs. On 10 November, PostgREST accounted for 98.4% of combined egress. Those are historical baselines, not a forecast of savings.
 
 After deploying, compare complete days of this project's database API egress with comparable traffic and editorial activity. Supabase reporting can lag by an hour. Check both the homepage and story routes for cache reuse, then verify a publication or withdrawal appears promptly. Existing requests bypassing anonymous HTML caching will continue to read current data; the separate admin-list projection reduces the bytes per read there.
