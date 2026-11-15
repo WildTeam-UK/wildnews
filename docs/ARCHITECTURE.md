@@ -47,6 +47,8 @@ The public application reads published records with the Supabase publishable key
 
 Preview deployments are marked `noindex`. Production metadata permits indexing of public pages while `robots.txt` excludes `/admin/` and `/api/`.
 
+`next.config.mjs` disables body-streamed metadata for all user agents through Vinext's supported `htmlLimitedBots` setting. Canonical links and other generated metadata resolve in the document head before HTML is sent. The anonymous public-cache render supplies a fixed, non-empty user agent because Vinext otherwise streams metadata for requests without one. This keeps the shared browser/crawler HTML representation consistent without adding user-agent cache variants. Check built or deployed HTML with `node scripts/verify-public-seo.mjs <base-url> <public-path>...`.
+
 Vercel applies browser-security headers to every route: MIME sniffing is disabled, framing is denied, cross-origin referrers are limited to their origin, and unused camera, geolocation, microphone, payment and USB capabilities are disabled. The Content Security Policy restricts pages to same-origin code and fonts, permits the inline hydration and style output required by the current Vinext/React implementation, permits browser connections only to WildNews and Supabase, and permits HTTPS editorial images because administrators may supply attributed images outside Unsplash or Supabase Storage.
 
 ## Framework and principal dependencies

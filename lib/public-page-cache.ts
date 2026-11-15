@@ -65,7 +65,9 @@ export function createPublicPageCache(options: Options) {
       work = (async () => {
         const url = new URL(path, request.url);
         // Cache only a canonical anonymous HTML representation, never cookies or RSC.
-        const response = await options.render(new Request(url, { headers: { accept: 'text/html' } }));
+        // Vinext applies htmlLimitedBots only to non-empty user agents. Use a
+        // fixed anonymous agent so cached HTML also resolves metadata in head.
+        const response = await options.render(new Request(url, { headers: { accept: 'text/html', 'user-agent': 'WildNews-Public-HTML/1.0' } }));
         if (!response.headers.get('content-type')?.includes('text/html')) return response;
         const body = await response.text();
         const headers = new Headers(response.headers);
