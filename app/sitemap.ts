@@ -1,6 +1,6 @@
 import type { MetadataRoute } from 'next';
 import { digestPath } from '@/lib/digests';
-import { getAllPublishedStories, publishedTags, publishedTopics } from '@/lib/published-stories';
+import { getAllPublishedStories, publicTagArchiveSlugs, publishedTopics } from '@/lib/published-stories';
 import { absoluteUrl } from '@/lib/seo';
 import { topicSlug } from '@/lib/stories';
 
@@ -19,7 +19,7 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   const latestUpdate = stories.reduce((latest, story) => Math.max(latest, Date.parse(story.updated_at)), 0);
   const archiveLastModified = latestUpdate ? new Date(latestUpdate) : new Date();
   const topicSlugs = new Set(stories.flatMap((story) => publishedTopics(story).map(topicSlug)));
-  const tagSlugs = new Set(stories.flatMap((story) => publishedTags(story).map((tag) => tag.slug)));
+  const tagSlugs = publicTagArchiveSlugs(stories);
   const staticEntries = staticPages.map(({ path, ...entry }) => ({ url: absoluteUrl(path), lastModified: archiveLastModified, ...entry }));
   const storyEntries = stories.map((story) => {
     const type = story.content_type === 'weekly_digest' ? 'weekly' : story.content_type === 'daily_digest' ? 'daily' : null;

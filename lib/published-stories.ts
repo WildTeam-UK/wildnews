@@ -22,6 +22,7 @@ type PublishedEditorialUpdate = { id: string; change_summary: string; applied_at
 export type PublishedConservationOutlook = { classification: 'positive' | 'mixed' | 'neutral' | 'negative'; score: number; confidence: number; rationale: string };
 
 export type PublicTaxonomyArchive = { name: string; slug: string; description: string | null; seo_title: string | null; meta_description: string | null };
+export const PUBLIC_TAG_MIN_STORIES = 20;
 
 export type PublishedStory = {
   id: string;
@@ -74,6 +75,34 @@ export function publishedTags(story: PublishedStory) {
   }).sort((a, b) => b.confidence - a.confidence || a.name.localeCompare(b.name));
 }
 
+export function publicTagArchiveSlugs(stories: PublishedStory[]): Set<string> {
+  const memberships = new Map<string, Set<string>>();
+  for (const story of stories) {
+    if (story.content_type !== 'news') continue;
+    for (const tag of publishedTags(story)) {
+      const ids = memberships.get(tag.slug) ?? new Set<string>();
+      ids.add(story.id);
+      memberships.set(tag.slug, ids);
+    }
+  }
+  return new Set([...memberships].filter(([, ids]) => ids.size >= PUBLIC_TAG_MIN_STORIES).map(([slug]) => slug));
+}
+
+export const hasPublicTagArchive = cache(async (slug: string): Promise<boolean> => {
+  const { count, error } = await getSupabasePublicClient().from('stories')
+    .select('id, public_tag:story_tags!inner(content_tags!inner(slug, status))', { count: 'exact', head: true })
+    .eq('status', 'published').eq('content_type', 'news').lte('published_at', new Date().toISOString())
+    .eq('public_tag.content_tags.slug', slug).eq('public_tag.content_tags.status', 'approved');
+  if (error) throw error;
+  return (count ?? 0) >= PUBLIC_TAG_MIN_STORIES;
+});
+
+export async function getPublicDiscoveryTags(story: PublishedStory) {
+  const tags = publishedTags(story).slice(0, 3);
+  const available = await Promise.all(tags.map((tag) => hasPublicTagArchive(tag.slug)));
+  return tags.filter((_, index) => available[index]);
+}
+
 export function publishedConservationOutlook(story: PublishedStory) {
   return firstRelation(story.story_conservation_outlooks);
 }
@@ -101,7 +130,7 @@ export const getPublicTopic = cache(async (slug: string): Promise<PublicTaxonomy
 export const getPublicTag = cache(async (slug: string): Promise<PublicTaxonomyArchive | null> => {
   const { data, error } = await getSupabasePublicClient().from('content_tags').select('name, slug, description, seo_title, meta_description').eq('slug', slug).eq('status', 'approved').maybeSingle();
   if (error) throw error;
-  return data as PublicTaxonomyArchive | null;
+  return data && await hasPublicTagArchive(slug) ? data as PublicTaxonomyArchive : null;
 });
 
 // Filter by the canonical taxonomy relationship before pagination. A quiet tag

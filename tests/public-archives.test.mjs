@@ -28,19 +28,20 @@ const published = await load('lib/published-stories.ts');
 const pagination = await load('lib/archive-pagination.ts');
 const tagPage = await load('app/tags/[tag]/page.tsx');
 const topicPage = await load('app/topics/[topic]/page.tsx');
+const sitemap = await load('app/sitemap.ts');
 
 function fixture() {
   const f = { calls: [], failure: null, stories: Array.from({ length: 350 }, (_, index) => ({
     id: String(350 - index).padStart(4, '0'), slug: `fixture-${index}`, status: 'published', published_at: '2026-01-01T00:00:00Z',
     headline: `Story ${index}`, standfirst: 'Fixture summary', content_type: index % 10 ? 'news' : 'daily_digest',
     story_topics: [{ topics: { name: 'Wildlife', slug: 'wildlife' } }],
-    story_tags: [{ confidence: 1, content_tags: { name: index >= 344 ? 'Old tag' : 'Busy tag', slug: index >= 344 ? 'old-tag' : 'busy-tag', status: 'approved' } }],
+    story_tags: [{ confidence: 1, content_tags: { name: index >= 325 ? 'Old tag' : 'Busy tag', slug: index >= 325 ? 'old-tag' : 'busy-tag', status: 'approved' } }],
     article_topics: ['Wildlife'], digest_topics: [],
   })) };
   f.stories.push({ ...f.stories[0], id: 'future', slug: 'future', published_at: '2999-01-01T00:00:00Z' }, { ...f.stories[0], id: 'draft', slug: 'draft', status: 'draft' });
   const archives = {
     topics: [{ name: 'Wildlife', slug: 'wildlife', active: true }, { name: 'Inactive', slug: 'inactive', active: false }],
-    content_tags: [{ name: 'Old tag', slug: 'old-tag', status: 'approved' }, { name: 'Busy tag', slug: 'busy-tag', status: 'approved' }, { name: 'Proposed', slug: 'proposed', status: 'proposed' }, { name: 'Empty', slug: 'empty', status: 'approved' }],
+    content_tags: [{ name: 'Old tag', slug: 'old-tag', status: 'approved' }, { name: 'Busy tag', slug: 'busy-tag', status: 'approved' }, { name: 'Proposed', slug: 'proposed', status: 'proposed' }, { name: 'Empty', slug: 'empty', status: 'approved' }, { name: 'Nineteen', slug: 'nineteen', status: 'approved' }, { name: 'Twenty', slug: 'twenty', status: 'approved' }],
   };
   f.client = { from(table) {
     const call = { table, filters: [], orders: [] }; f.calls.push(call);
@@ -58,6 +59,8 @@ function fixture() {
         rows = rows.filter((row) => call.filters.every(([key, value, operation]) => {
           if (key === 'archive_match.topics.slug') return row.story_topics.some((link) => link.topics.slug === value);
           if (key === 'archive_match.content_tags.slug') return row.story_tags.some((link) => link.content_tags.slug === value);
+          if (key === 'public_tag.content_tags.slug') return row.story_tags.some((link) => link.content_tags.slug === value);
+          if (key === 'public_tag.content_tags.status') return row.story_tags.some((link) => link.content_tags.status === value);
           return operation === 'lte' ? row[key] <= value : row[key] === value;
         }));
         const count = rows.length;
@@ -76,11 +79,11 @@ test('a populated tag beyond the newest 200 stories is restored', async () => {
   const oldWindow = await published.getPublishedStories(200);
   assert.equal(oldWindow.some((story) => published.publishedTags(story).some((tag) => tag.slug === 'old-tag')), false);
   const archive = await published.getPublishedArchive('tags', 'old-tag', 1);
-  assert.equal(archive.total, 6);
-  assert.equal(archive.stories.length, 6);
+  assert.equal(archive.total, 25);
+  assert.equal(archive.stories.length, 24);
 });
 
-for (const [kind, slug, count] of [['topics', 'wildlife', 350], ['tags', 'busy-tag', 344]]) test(`${kind}: every published record is reachable exactly once across stable pages`, async () => {
+for (const [kind, slug, count] of [['topics', 'wildlife', 350], ['tags', 'busy-tag', 325]]) test(`${kind}: every published record is reachable exactly once across stable pages`, async () => {
   const f = fixture(); const ids = [];
   for (let page = 1; page <= Math.ceil(count / 24); page++) {
     const result = await published.getPublishedArchive(kind, slug, page);
@@ -95,6 +98,31 @@ for (const [kind, slug, count] of [['topics', 'wildlife', 350], ['tags', 'busy-t
     assert.deepEqual(q.orders, [['published_at', { ascending: false }], ['id', { ascending: false }]]);
     assert.equal(q.range[1] - q.range[0], 23);
   }
+});
+
+test('20 published articles are required consistently by routes, sitemap and discovery links', async () => {
+  const f = fixture();
+  const nineteen = { confidence: 2, content_tags: { name: 'Nineteen', slug: 'nineteen', status: 'approved' } };
+  const twenty = { confidence: 3, content_tags: { name: 'Twenty', slug: 'twenty', status: 'approved' } };
+  const news = f.stories.filter((story) => story.status === 'published' && story.published_at < new Date().toISOString() && story.content_type === 'news');
+  for (const [index, story] of news.slice(0, 20).entries()) story.story_tags.push(...(index < 19 ? [nineteen, twenty] : [twenty]));
+  // Drafts, future publications and digests must not turn 19 into 20.
+  for (const story of f.stories.filter((story) => story.status === 'draft' || story.id === 'future' || story.content_type !== 'news')) story.story_tags.push(nineteen);
+  assert.equal(await published.hasPublicTagArchive('nineteen'), false);
+  assert.equal(await published.hasPublicTagArchive('twenty'), true);
+  assert.equal(await published.getPublicTag('nineteen'), null);
+  assert.ok(await published.getPublicTag('twenty'));
+  assert.equal(await published.getPublishedArchive('tags', 'nineteen', 1), null);
+  assert.equal((await published.getPublishedArchive('tags', 'twenty', 1)).total, 20);
+  const entries = await sitemap.default();
+  assert.equal(entries.some((entry) => entry.url.endsWith('/tags/nineteen')), false);
+  assert.equal(entries.some((entry) => entry.url.endsWith('/tags/twenty')), true);
+  const listingStory = (await published.getPublishedStories(350)).find((story) => story.id === news[0].id);
+  const links = await published.getPublicDiscoveryTags(listingStory);
+  assert.equal(links.some((tag) => tag.slug === 'nineteen'), false);
+  assert.equal(links.some((tag) => tag.slug === 'twenty'), true);
+  const metadata = await tagPage.generateMetadata({ params: Promise.resolve({ tag: 'nineteen' }), searchParams: Promise.resolve({}) });
+  assert.deepEqual(metadata.robots, { index: false, follow: false });
 });
 
 test('missing, proposed, inactive, empty and out-of-range archives stay unavailable without a large offset', async () => {

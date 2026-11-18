@@ -96,19 +96,34 @@ test('expired workers cannot revive themselves and old-day runs cannot select', 
   } finally { await db.close(); }
 });
 
-test('publication claims reserve the tenth slot and exclude the digest from the cap', async () => {
+for (const target of [5, 10]) test(`publication claims reserve the last slot of ${target} and exclude digests`, async () => {
   const db = await fixture();
   try {
-    for (let i = 0; i < 12; i++) {
-      await db.query("insert into stories(id, status, published_at) values ($1, $2, $3)", [uuid(i), i < 9 ? 'published' : 'draft', i < 9 ? new Date() : null]);
-      if (i >= 9) await db.query("insert into publication_queue(story_id, status, scheduled_for, source_run_id) values ($1, 'scheduled', now(), $2)", [uuid(i), runId]);
+    await db.query('update editorial_run_settings set max_new_drafts = $1', [target]);
+    for (let i = 0; i < target + 2; i++) {
+      await db.query("insert into stories(id, status, published_at) values ($1, $2, $3)", [uuid(i), i < target - 1 ? 'published' : 'draft', i < target - 1 ? new Date() : null]);
+      if (i >= target - 1) await db.query("insert into publication_queue(story_id, status, scheduled_for, source_run_id) values ($1, 'scheduled', now(), $2)", [uuid(i), runId]);
     }
     await db.query("insert into stories(id, content_type, status, published_at) values ($1, 'daily_digest', 'published', now())", [uuid(50)]);
     const claims = await Promise.all([scalar(db, 'select claim_due_publication()'), scalar(db, 'select claim_due_publication()')]);
     assert.equal(claims.filter(Boolean).length, 1);
     await db.exec("update stories set status = 'published', published_at = now() where id in (select story_id from publication_queue where status = 'publishing')");
     assert.equal(await scalar(db, 'select claim_due_publication()'), null);
-    assert.equal(await scalar(db, "select count(*) from stories where content_type = 'news' and status = 'published'"), 10);
+    assert.equal(await scalar(db, "select count(*) from stories where content_type = 'news' and status = 'published'"), target);
+  } finally { await db.close(); }
+});
+
+test('reducing the live target below articles already published blocks the remaining queue', async () => {
+  const db = await fixture();
+  try {
+    for (let i = 0; i < 10; i++) {
+      await db.query("insert into stories(id, status, published_at) values ($1, $2, $3)", [uuid(i), i < 6 ? 'published' : 'draft', i < 6 ? new Date() : null]);
+      if (i >= 6) await db.query("insert into publication_queue(story_id, status, scheduled_for, source_run_id) values ($1, 'scheduled', now(), $2)", [uuid(i), runId]);
+    }
+    await db.exec('update editorial_run_settings set max_new_drafts = 5');
+    assert.equal(await scalar(db, 'select claim_due_publication()'), null);
+    assert.equal(await scalar(db, "select count(*) from stories where status = 'published'"), 6);
+    assert.equal(await scalar(db, "select count(*) from publication_queue where status = 'publishing'"), 0);
   } finally { await db.close(); }
 });
 

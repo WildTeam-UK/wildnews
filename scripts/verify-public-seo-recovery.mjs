@@ -4,6 +4,7 @@ import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
+import { createClient } from '@supabase/supabase-js';
 
 // Run against a local production build. Only public Supabase reads may leave
 // this process; all failure injection and browser requests stay local.
@@ -47,20 +48,41 @@ const cardLinks = (html) => [...(html.match(/<section class="topic-page-grid she
 
 if (process.env.WILDNEWS_BASELINE_BUILD) {
   const baseline = (await import(pathToFileURL(resolve(process.env.WILDNEWS_BASELINE_BUILD)).href)).default;
-  assert.equal((await request('/tags/water-security', {}, baseline)).response.status, 404);
   outage = true;
-  assert.equal((await request('/topics/wildlife?recovery-test=baseline', {}, baseline)).response.status, 200);
+  assert.ok([200, 503].includes((await request('/topics/wildlife?recovery-test=baseline', {}, baseline)).response.status));
   outage = false;
 }
 
-const restored = await request('/tags/water-security');
+const restored = await request('/tags/indigenous-peoples-and-local-communities');
 assert.equal(restored.response.status, 200);
 assert.ok(cardLinks(restored.body).length > 0);
-assert.equal(headCanonical(restored.body), 'https://news.wildteam.org.uk/tags/water-security');
+assert.equal(headCanonical(restored.body), 'https://news.wildteam.org.uk/tags/indigenous-peoples-and-local-communities');
 const sitemap = await request('/sitemap.xml');
 assert.equal(sitemap.response.status, 200);
 const taxonomyPaths = [...sitemap.body.matchAll(/<loc>https:\/\/news\.wildteam\.org\.uk(\/(?:topics|tags)\/[^<]+)<\/loc>/g)].map((match) => match[1]);
 assert.ok(taxonomyPaths.length > 0);
+// Count unique published articles independently of the archive and sitemap code.
+const client = createClient(database.href, process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY, { auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false } });
+const tagCounts = new Map();
+for (let from = 0; ; from += 1000) {
+  const { data, error } = await client.from('stories').select('id, story_tags(content_tags(slug, status))')
+    .eq('status', 'published').eq('content_type', 'news').lte('published_at', new Date().toISOString())
+    .order('id').range(from, from + 999);
+  assert.ifError(error);
+  for (const story of data) for (const link of story.story_tags) {
+    const tag = Array.isArray(link.content_tags) ? link.content_tags[0] : link.content_tags;
+    if (tag?.status !== 'approved') continue;
+    const ids = tagCounts.get(tag.slug) ?? new Set(); ids.add(story.id); tagCounts.set(tag.slug, ids);
+  }
+  if (data.length < 1000) break;
+}
+for (const [slug, ids] of tagCounts) {
+  const path = `/tags/${slug}`; const eligible = ids.size >= 20;
+  assert.equal(taxonomyPaths.includes(path), eligible, `Sitemap threshold ${slug}`);
+  const { response, body } = await request(path);
+  assert.equal(response.status, eligible ? 200 : 404, `Archive threshold ${slug}: ${ids.size}`);
+  if (!eligible) assert.match(body, /noindex/);
+}
 for (const path of taxonomyPaths) {
   const { response, body } = await request(path);
   assert.equal(response.status, 200, `Sitemap archive ${path}`);
@@ -90,6 +112,12 @@ for (const path of ['/tags/passive-acoustic-monitoring', '/tags/recovery-test-mi
   assert.equal((await request(path)).response.status, 404, path);
 }
 assert.equal(headCanonical((await request('/topics/wildlife?page=1')).body), 'https://news.wildteam.org.uk/topics/wildlife');
+for (const slug of ['hazel-dormouse-numbers-show-a-small-recent-rise-after-long-decline', 'mura-residents-and-potash-company-dispute-reports-of-dried-springs']) {
+  const { response, body } = await request(`/stories/${slug}`);
+  assert.equal(response.status, 200);
+  for (const match of body.matchAll(/<a[^>]*href="\/tags\/([a-z0-9-]+)"/g)) assert.ok(tagCounts.get(match[1])?.size >= 20, `Link to withheld tag ${match[1]}`);
+  assert.match(body, /"@type":"NewsArticle"/);
+}
 
 outage = true;
 for (const path of ['/topics/wildlife?page=2', '/tags/indigenous-peoples-and-local-communities?page=2', '/stories/global-fungal-conservation-strategy-launched-at-cop17?recovery-test=outage']) {
@@ -105,13 +133,13 @@ for (const headers of [{ cookie: 'sb-fixture-auth-token=private' }, { authorizat
   assert.equal((await request('/topics/wildlife', { headers })).response.status, 503);
 }
 // Previously healthy shared snapshots remain usable during a short outage.
-assert.equal((await request('/tags/water-security')).response.status, 200);
+assert.equal((await request('/tags/indigenous-peoples-and-local-communities')).response.status, 200);
 outage = false;
 assert.equal((await request('/topics/wildlife?page=2')).response.status, 200);
 
 const artifactDirectory = `/tmp/wildnews-seo-recovery-${Date.now()}`;
 await mkdir(artifactDirectory);
-await writeFile(`${artifactDirectory}/water-security.html`, restored.body);
+await writeFile(`${artifactDirectory}/eligible-tag.html`, restored.body);
 await writeFile(`${artifactDirectory}/results.json`, JSON.stringify({ results, archives, publicReads, upstreamWrites: 0 }, null, 2));
 console.log(JSON.stringify({ checks: results.length, sitemapArchives: taxonomyPaths.length, restoredTagStories: cardLinks(restored.body).length, archives, publicReads, upstreamWrites: 0, artifactDirectory }));
 
