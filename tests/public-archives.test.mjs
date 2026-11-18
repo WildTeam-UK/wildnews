@@ -29,6 +29,7 @@ const pagination = await load('lib/archive-pagination.ts');
 const tagPage = await load('app/tags/[tag]/page.tsx');
 const topicPage = await load('app/topics/[topic]/page.tsx');
 const sitemap = await load('app/sitemap.ts');
+const llms = await load('app/llms.txt/route.ts');
 
 function fixture() {
   const f = { calls: [], failure: null, stories: Array.from({ length: 350 }, (_, index) => ({
@@ -118,11 +119,26 @@ test('20 published articles are required consistently by routes, sitemap and dis
   assert.equal(entries.some((entry) => entry.url.endsWith('/tags/nineteen')), false);
   assert.equal(entries.some((entry) => entry.url.endsWith('/tags/twenty')), true);
   const listingStory = (await published.getPublishedStories(350)).find((story) => story.id === news[0].id);
-  const links = await published.getPublicDiscoveryTags(listingStory);
+  const links = (await published.getPublicArticleTags(listingStory)).discoveryTags;
   assert.equal(links.some((tag) => tag.slug === 'nineteen'), false);
   assert.equal(links.some((tag) => tag.slug === 'twenty'), true);
+  const machineIndex = await (await llms.GET()).text();
+  assert.equal(machineIndex.includes('/tags/nineteen'), false);
+  assert.equal(machineIndex.includes('/tags/twenty'), true);
   const metadata = await tagPage.generateMetadata({ params: Promise.resolve({ tag: 'nineteen' }), searchParams: Promise.resolve({}) });
   assert.deepEqual(metadata.robots, { index: false, follow: false });
+});
+
+test('stored contextual tag links follow eligibility without stripping other destinations', async () => {
+  fixture();
+  const urls = ['/tags/busy-tag', '/tags/empty', 'https://news.wildteam.org.uk/tags/busy-tag?page=2', 'https://news.wildteam.org.uk/tags/empty#section', '/topics/wildlife', '/stories/fixture-1', 'https://example.org/tags/empty'];
+  const filtered = published.publicArticleTagLinks(urls.map((href) => ({ href })), new Set(['busy-tag']));
+  assert.deepEqual(filtered.map((link) => link.href), [urls[0], urls[2], urls[4], urls[5], urls[6]]);
+  const story = (await published.getPublishedStories(1))[0];
+  story.story_contextual_links = [{ href: '/tags/old-tag' }, { href: '/tags/empty' }];
+  const result = await published.getPublicArticleTags(story);
+  assert.equal(result.eligibleSlugs.has('old-tag'), true);
+  assert.equal(result.eligibleSlugs.has('empty'), false);
 });
 
 test('missing, proposed, inactive, empty and out-of-range archives stay unavailable without a large offset', async () => {

@@ -5,7 +5,7 @@ import { ArticleTemplate } from '@/components/article-template';
 import { EditorialPageEnd } from '@/components/editorial-page-end';
 import { InteriorHeader } from '@/components/interior-header';
 import { JsonLd } from '@/components/json-ld';
-import { getGoodNewsSettings, getPublishedStories, getPublishedStory, getPublicDiscoveryTags, publishedStoryToArticle, publishedStoryToListing, publishedTopics, relatedPublishedStories } from '@/lib/published-stories';
+import { getGoodNewsSettings, getPublishedStories, getPublishedStory, getPublicArticleTags, publishedStoryToArticle, publishedStoryToListing, publishedTopics, relatedPublishedStories } from '@/lib/published-stories';
 import { articleMetadata, newsArticleJsonLd, withSiteName } from '@/lib/seo';
 import { operationalLog } from '@/lib/operational-log';
 
@@ -27,14 +27,14 @@ export default async function StoryPage({ params }: { params: Promise<{ slug: st
   const published = await getPublishedStory(slug);
   if (!published) notFound();
 
-  const [relatedResult, settingsResult, tagsResult] = await Promise.allSettled([getPublishedStories(20), getGoodNewsSettings(), getPublicDiscoveryTags(published)]);
+  const [relatedResult, settingsResult, tagsResult] = await Promise.allSettled([getPublishedStories(20), getGoodNewsSettings(), getPublicArticleTags(published)]);
   const allPublished = relatedResult.status === 'fulfilled' ? relatedResult.value : [];
   const goodNewsSettings = settingsResult.status === 'fulfilled' ? settingsResult.value : undefined;
   const degraded = relatedResult.status === 'rejected' || settingsResult.status === 'rejected' || tagsResult.status === 'rejected';
   for (const result of [relatedResult, settingsResult, tagsResult]) if (result.status === 'rejected') operationalLog('error', { operation: 'story_optional_section' }, result.reason);
   const related = relatedPublishedStories([published], allPublished).map((story) => publishedStoryToListing(story, goodNewsSettings));
-  const article = publishedStoryToArticle(published, goodNewsSettings);
-  article.discoveryTags = tagsResult.status === 'fulfilled' ? tagsResult.value : [];
+  const article = publishedStoryToArticle(published, goodNewsSettings, tagsResult.status === 'fulfilled' ? tagsResult.value.eligibleSlugs : new Set());
+  article.discoveryTags = tagsResult.status === 'fulfilled' ? tagsResult.value.discoveryTags : [];
   const structuredData = newsArticleJsonLd({ headline: published.headline, description: published.standfirst, path: `/stories/${published.slug}`, image: article.imageUrl, publishedTime: published.published_at, modifiedTime: published.editorial_updated_at ?? published.published_at, sections: publishedTopics(published) });
 
   return <main data-public-page-degraded={degraded ? true : undefined}>

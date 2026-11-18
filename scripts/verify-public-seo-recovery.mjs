@@ -83,6 +83,9 @@ for (const [slug, ids] of tagCounts) {
   assert.equal(response.status, eligible ? 200 : 404, `Archive threshold ${slug}: ${ids.size}`);
   if (!eligible) assert.match(body, /noindex/);
 }
+const machineIndex = await request('/llms.txt');
+assert.equal(machineIndex.response.status, 200);
+for (const match of machineIndex.body.matchAll(/https:\/\/news\.wildteam\.org\.uk\/tags\/([a-z0-9-]+)/g)) assert.ok(tagCounts.get(match[1])?.size >= 20, `Machine index advertises withheld tag ${match[1]}`);
 for (const path of taxonomyPaths) {
   const { response, body } = await request(path);
   assert.equal(response.status, 200, `Sitemap archive ${path}`);
@@ -112,10 +115,10 @@ for (const path of ['/tags/passive-acoustic-monitoring', '/tags/recovery-test-mi
   assert.equal((await request(path)).response.status, 404, path);
 }
 assert.equal(headCanonical((await request('/topics/wildlife?page=1')).body), 'https://news.wildteam.org.uk/topics/wildlife');
-for (const slug of ['hazel-dormouse-numbers-show-a-small-recent-rise-after-long-decline', 'mura-residents-and-potash-company-dispute-reports-of-dried-springs']) {
+for (const slug of ['hazel-dormouse-numbers-show-a-small-recent-rise-after-long-decline', 'mura-residents-and-potash-company-dispute-reports-of-dried-springs', 'a-year-after-bais-bay-spill-communities-and-marine-habitats-show-lasting-impacts', 'african-parks-receives-4-6m-commitment-tied-to-outcomes-at-four-african-sites', 'ai-assisted-survey-maps-rare-bats-across-english-woodlands']) {
   const { response, body } = await request(`/stories/${slug}`);
   assert.equal(response.status, 200);
-  for (const match of body.matchAll(/<a[^>]*href="\/tags\/([a-z0-9-]+)"/g)) assert.ok(tagCounts.get(match[1])?.size >= 20, `Link to withheld tag ${match[1]}`);
+  for (const match of body.matchAll(/<a[^>]*href="(?:https:\/\/news\.wildteam\.org\.uk)?\/tags\/([a-z0-9-]+)/g)) assert.ok(tagCounts.get(match[1])?.size >= 20, `Link to withheld tag ${match[1]}`);
   assert.match(body, /"@type":"NewsArticle"/);
 }
 

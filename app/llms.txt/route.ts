@@ -1,5 +1,5 @@
 import { digestPath } from '@/lib/digests';
-import { getPublishedStories, publishedTags, publishedTopics } from '@/lib/published-stories';
+import { getAllPublishedStories, getPublishedStories, publicTagArchiveSlugs, publishedTags, publishedTopics } from '@/lib/published-stories';
 import { absoluteUrl } from '@/lib/seo';
 import { topicSlug } from '@/lib/stories';
 
@@ -24,11 +24,12 @@ function storyPath(story: Awaited<ReturnType<typeof getPublishedStories>>[number
 }
 
 export async function GET() {
-  const stories = await getPublishedStories(500);
+  const stories = await getAllPublishedStories();
   const news = stories.filter((story) => story.content_type === 'news').slice(0, 20);
   const digests = stories.filter((story) => story.content_type !== 'news').slice(0, 10);
   const topics = [...new Set(stories.flatMap(publishedTopics))].sort((a, b) => a.localeCompare(b));
-  const tags = [...new Map(stories.flatMap(publishedTags).map((tag) => [tag.slug, tag])).values()]
+  const eligibleTags = publicTagArchiveSlugs(stories);
+  const tags = [...new Map(stories.flatMap(publishedTags).filter((tag) => eligibleTags.has(tag.slug)).map((tag) => [tag.slug, tag])).values()]
     .sort((a, b) => a.name.localeCompare(b.name))
     .slice(0, 50);
 

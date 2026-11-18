@@ -97,10 +97,26 @@ export const hasPublicTagArchive = cache(async (slug: string): Promise<boolean> 
   return (count ?? 0) >= PUBLIC_TAG_MIN_STORIES;
 });
 
-export async function getPublicDiscoveryTags(story: PublishedStory) {
+function publicTagSlug(href: string): string | null {
+  try {
+    const url = new URL(href, 'https://news.wildteam.org.uk');
+    return url.origin === 'https://news.wildteam.org.uk' ? /^\/tags\/([a-z0-9-]+)\/?$/.exec(url.pathname)?.[1] ?? null : null;
+  } catch { return null; }
+}
+
+export function publicArticleTagLinks<T extends { href: string }>(links: T[], eligibleSlugs: ReadonlySet<string>): T[] {
+  return links.filter((link) => {
+    const slug = publicTagSlug(link.href);
+    return slug === null || eligibleSlugs.has(slug);
+  });
+}
+
+export async function getPublicArticleTags(story: PublishedStory & { story_contextual_links?: { href: string }[] }) {
   const tags = publishedTags(story).slice(0, 3);
-  const available = await Promise.all(tags.map((tag) => hasPublicTagArchive(tag.slug)));
-  return tags.filter((_, index) => available[index]);
+  const slugs = [...new Set([...tags.map((tag) => tag.slug), ...(story.story_contextual_links ?? []).flatMap((link) => publicTagSlug(link.href) ?? [])])];
+  const available = await Promise.all(slugs.map((slug) => hasPublicTagArchive(slug)));
+  const eligibleSlugs = new Set(slugs.filter((_, index) => available[index]));
+  return { discoveryTags: tags.filter((tag) => eligibleSlugs.has(tag.slug)), eligibleSlugs };
 }
 
 export function publishedConservationOutlook(story: PublishedStory) {
@@ -230,8 +246,9 @@ export function relatedPublishedStories(referenceStories: PublishedStory[], cand
     .map(({ story }) => story);
 }
 
-export function publishedStoryToArticle(story: PublishedStoryDetail, goodNewsSettings?: GoodNewsSettings): ArticleTemplateData {
-  const content = attachStoredArticleLinks(migrateDraftContent(structuredClone(story.generation_metadata.article_content)), story.story_contextual_links.map((link) => ({ type: link.link_type, target_id: link.target_id, href: link.href, anchor_text: link.anchor_text, section_key: link.section_key, item_index: link.item_index, external: link.external, confidence: link.confidence, rationale: link.rationale ?? '' })));
+export function publishedStoryToArticle(story: PublishedStoryDetail, goodNewsSettings?: GoodNewsSettings, eligibleTagSlugs?: ReadonlySet<string>): ArticleTemplateData {
+  const links = eligibleTagSlugs ? publicArticleTagLinks(story.story_contextual_links, eligibleTagSlugs) : story.story_contextual_links;
+  const content = attachStoredArticleLinks(migrateDraftContent(structuredClone(story.generation_metadata.article_content)), links.map((link) => ({ type: link.link_type, target_id: link.target_id, href: link.href, anchor_text: link.anchor_text, section_key: link.section_key, item_index: link.item_index, external: link.external, confidence: link.confidence, rationale: link.rationale ?? '' })));
   const sources = [...story.story_sources].sort((a, b) => a.display_order - b.display_order);
   const featuredRecommendation = story.story_course_recommendations?.find((recommendation) => recommendation.placement === 'featured');
   const coursePromotion = featuredRecommendation ? firstRelation(featuredRecommendation.training_courses) : null;
