@@ -9,6 +9,7 @@ import type { TrainingCoursePromotion } from '@/lib/training-courses';
 import { attachStoredArticleLinks, type ArticleLinkSection, type ArticleLinkType } from '@/lib/article-linking';
 import { firstRelation } from '@/lib/supabase/relations';
 import React from 'react';
+import { ARCHIVE_PAGE_SIZE } from '@/lib/archive-pagination';
 
 const { cache } = React;
 
@@ -101,6 +102,31 @@ export const getPublicTag = cache(async (slug: string): Promise<PublicTaxonomyAr
   const { data, error } = await getSupabasePublicClient().from('content_tags').select('name, slug, description, seo_title, meta_description').eq('slug', slug).eq('status', 'approved').maybeSingle();
   if (error) throw error;
   return data as PublicTaxonomyArchive | null;
+});
+
+// Filter by the canonical taxonomy relationship before pagination. A quiet tag
+// must remain available even when all its stories predate the homepage window.
+export const getPublishedArchive = cache(async (kind: 'topics' | 'tags', slug: string, page: number) => {
+  if (!Number.isSafeInteger(page) || page < 1 || !Number.isSafeInteger(page * ARCHIVE_PAGE_SIZE)) return null;
+  const archive = await (kind === 'topics' ? getPublicTopic(slug) : getPublicTag(slug));
+  if (!archive) return null;
+  const relation = kind === 'topics' ? 'story_topics!inner(topics!inner(slug))' : 'story_tags!inner(content_tags!inner(slug))';
+  const column = kind === 'topics' ? 'archive_match.topics.slug' : 'archive_match.content_tags.slug';
+  const publishedAt = new Date().toISOString();
+  // Count first so out-of-range requests never trigger an enormous offset scan.
+  const { count, error: countError } = await getSupabasePublicClient().from('stories')
+    .select(`id, archive_match:${relation}`, { count: 'exact', head: true })
+    .eq('status', 'published').lte('published_at', publishedAt).eq(column, slug);
+  if (countError) throw countError;
+  if (!count || page > Math.ceil(count / ARCHIVE_PAGE_SIZE)) return null;
+  const { data, error } = await getSupabasePublicClient().from('stories')
+    .select(`${storyListingSelect}, archive_match:${relation}`)
+    .eq('status', 'published').lte('published_at', publishedAt).eq(column, slug)
+    .order('published_at', { ascending: false }).order('id', { ascending: false })
+    .range((page - 1) * ARCHIVE_PAGE_SIZE, page * ARCHIVE_PAGE_SIZE - 1);
+  if (error) throw error;
+  const stories = listingRecords(data ?? []);
+  return stories.length ? { archive, stories, total: count } : null;
 });
 
 export const getPublishedStory = cache(async (slug: string): Promise<PublishedStoryDetail | null> => {

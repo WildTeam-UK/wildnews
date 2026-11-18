@@ -737,3 +737,7 @@ figure:has(>img.editorial-image-fallback) .editorial-image-credit{display:none}
   html{scroll-behavior:auto}
   *,*::before,*::after{animation-duration:.01ms!important;animation-iteration-count:1!important;scroll-behavior:auto!important;transition-duration:.01ms!important}
 }
+
+/* Archive pagination reuses the existing public button and shell tokens. */
+.archive-pagination{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;padding-top:24px;padding-bottom:48px}
+@media(max-width:600px){.archive-pagination{justify-content:center}.archive-pagination>span:empty{display:none}.archive-pagination>span:not(:empty){flex-basis:100%;text-align:center;order:-1}}

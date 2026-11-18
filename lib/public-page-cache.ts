@@ -20,13 +20,44 @@ type Options = {
   now?: () => number;
 };
 
-export function publicPagePath(request: Request): string | null {
+export function publicHtmlPath(request: Request): string | null {
   const url = new URL(request.url);
-  if (!['GET', 'HEAD'].includes(request.method) || request.headers.has('authorization')) return null;
+  if (!['GET', 'HEAD'].includes(request.method)) return null;
   if (request.headers.has('rsc') || request.headers.has('next-router-state-tree') || request.headers.has('next-router-prefetch') || request.headers.has('next-action') || request.headers.get('accept')?.includes('text/x-component')) return null;
+  return /^(?:\/|\/(?:stories|topics|tags)\/[a-z0-9-]+|\/(?:daily|weekly)-digest\/\d{4}-\d{2}-\d{2}|\/(?:digests|good-news-in-conservation|how-we-use-ai|how-coverage-analysis-works|how-we-classify-good-news|about))$/.test(url.pathname) ? url.pathname : null;
+}
+
+export function publicPagePath(request: Request): string | null {
+  const path = publicHtmlPath(request);
+  if (!path || request.headers.has('authorization')) return null;
+  const url = new URL(request.url);
   if (/(?:^|;\s*)(?:sb-|__prerender_bypass|__next_preview_data)/.test(request.headers.get('cookie') ?? '')) return null;
   if ([...url.searchParams.keys()].some((key) => !key.startsWith('utm_') && !['_gl', 'gclid', 'fbclid'].includes(key))) return null;
-  return /^(?:\/|\/(?:stories|topics|tags)\/[a-z0-9-]+|\/(?:daily|weekly)-digest\/\d{4}-\d{2}-\d{2}|\/(?:digests|good-news-in-conservation|how-we-use-ai|how-coverage-analysis-works|how-we-classify-good-news|about))$/.test(url.pathname) ? url.pathname : null;
+  return path;
+}
+
+function unavailableHtml(body: string): boolean {
+  return /<main\b[^>]*\bdata-public-page-unavailable(?:[\s=>])/.test(body) || /<template\b[^>]*\bdata-dgst=/.test(body);
+}
+
+// Used after the origin render when shared caching was bypassed or failed.
+// Buffer HTML only; API, RSC and private routes never pass through this guard.
+export async function protectPublicHtml(response: Response, head = false): Promise<Response> {
+  if (!response.headers.get('content-type')?.includes('text/html') || [204, 205].includes(response.status) || (response.status >= 300 && response.status < 500)) {
+    return head ? new Response(null, { status: response.status, headers: response.headers }) : response;
+  }
+  const body = await response.text();
+  const headers = new Headers(response.headers);
+  headers.delete('content-length');
+  headers.delete('content-encoding');
+  const failed = response.status >= 500 || unavailableHtml(body);
+  if (failed) {
+    headers.set('Cache-Control', 'no-store');
+    headers.set('CDN-Cache-Control', 'no-store');
+    headers.set('Vercel-CDN-Cache-Control', 'no-store');
+    for (const name of ['age', 'etag', 'vercel-cache-tag', 'x-wildnews-cache']) headers.delete(name);
+  }
+  return new Response(head ? null : body, { status: failed ? 503 : response.status, headers });
 }
 
 export function createPublicPageCache(options: Options) {
@@ -73,14 +104,11 @@ export function createPublicPageCache(options: Options) {
         const headers = new Headers(response.headers);
         headers.delete('content-length');
         headers.delete('content-encoding');
-        const unavailable = /<main\b[^>]*\bdata-public-page-unavailable(?:[\s=>])/.test(body)
-          || /\bdata-dgst=/.test(body);
+        const unavailable = response.status === 200 && unavailableHtml(body);
         if (response.status >= 500 || unavailable) {
           options.report('public_page_render_failed');
           await options.store.set('render-failure', { path }, { ttl: 600, tags: [] }).catch(() => {});
-          headers.set('Cache-Control', 'no-store');
-          headers.set('Vercel-CDN-Cache-Control', 'no-store');
-          return new Response(body, { status: 503, headers });
+          return protectPublicHtml(new Response(body, { status: 503, headers }));
         }
         const degraded = /<main\b[^>]*\bdata-public-page-degraded(?:[\s=>])/.test(body);
         const successful = response.status === 200 && !headers.has('set-cookie') && !degraded;

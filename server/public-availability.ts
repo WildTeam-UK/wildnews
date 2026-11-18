@@ -1,6 +1,6 @@
 import { defineMiddleware, definePlugin } from 'nitro';
 import { waitUntil } from '@vercel/functions';
-import { createPublicPageCache, publicPagePath } from '../lib/public-page-cache';
+import { createPublicPageCache, publicPagePath, publicHtmlPath, protectPublicHtml } from '../lib/public-page-cache';
 import { invalidatePublicPages } from '../lib/invalidate-public-pages';
 import { operationalLog } from '../lib/operational-log';
 import { getPublicCacheStore } from '../lib/public-cache-store';
@@ -41,6 +41,17 @@ export default definePlugin((nitro) => {
         operationalLog('error', { operation: 'public_page_cache_failed', route: path }, error);
         // Cache infrastructure failure must not make a healthy origin unavailable.
       }
+    }
+    if (publicHtmlPath(event.req)) {
+      // HEAD has no response body to inspect. Render its GET representation once,
+      // preserving private headers/query parameters, then discard the body.
+      if (event.req.method === 'HEAD') {
+        const request = new Request(event.req, { method: 'GET' });
+        internalRequests.add(request);
+        return protectPublicHtml(await nitro.fetch(request), true);
+      }
+      const response = await next();
+      return response instanceof Response ? protectPublicHtml(response) : response;
     }
     const response = await next();
     if (path.startsWith('/api/admin/') && !['GET', 'HEAD', 'OPTIONS'].includes(event.req.method)
