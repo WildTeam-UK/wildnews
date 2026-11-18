@@ -139,6 +139,10 @@ test('stored contextual tag links follow eligibility without stripping other des
   const result = await published.getPublicArticleTags(story);
   assert.equal(result.eligibleSlugs.has('old-tag'), true);
   assert.equal(result.eligibleSlugs.has('empty'), false);
+  const digestLinks = [{ href: '/tags/old-tag', section_index: 0, paragraph_index: 1 }, { href: '/tags/empty', section_index: 0, paragraph_index: 1 }, { href: '/stories/fixture-1', section_index: 0, paragraph_index: 1 }];
+  const eligible = await published.getPublicTagLinkSlugs(digestLinks);
+  assert.deepEqual(published.publicArticleTagLinks(digestLinks, eligible), [digestLinks[0], digestLinks[2]]);
+  assert.equal(digestLinks.length, 3, 'Stored digest links are not mutated');
 });
 
 test('missing, proposed, inactive, empty and out-of-range archives stay unavailable without a large offset', async () => {

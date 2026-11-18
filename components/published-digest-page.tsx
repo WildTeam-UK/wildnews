@@ -7,6 +7,7 @@ import { SiteFooter } from '@/components/site-footer';
 import { cleanDigestText, digestPath, getPublishedDailyDigests, getPublishedDigest, type DigestContent, type DigestType } from '@/lib/digests';
 import { articleMetadata, newsArticleJsonLd, withSiteName } from '@/lib/seo';
 import { operationalLog } from '@/lib/operational-log';
+import { getPublicTagLinkSlugs, publicArticleTagLinks } from '@/lib/published-stories';
 
 export async function publishedDigestMetadata(type: DigestType, date: string): Promise<Metadata> {
   const digest = await getPublishedDigest(type, date);
@@ -34,6 +35,11 @@ export async function PublishedDigestPage({ type, date }: { type: DigestType; da
   ]);
   const content = digest?.generation_metadata.digest_content as DigestContent | undefined;
   if (!digest || !content) notFound();
+  const eligibleTags = await getPublicTagLinkSlugs(content.contextual_links ?? []).catch((error: unknown) => {
+    operationalLog('error', { operation: 'digest_optional_tag_links' }, error);
+    return undefined;
+  });
+  const publicContent = { ...content, contextual_links: publicArticleTagLinks(content.contextual_links ?? [], eligibleTags ?? new Set()) };
 
   const path = digestPath(type, date);
   const structuredData = newsArticleJsonLd({
@@ -46,11 +52,11 @@ export async function PublishedDigestPage({ type, date }: { type: DigestType; da
     sections: content.topics,
   });
 
-  return <main>
+  return <main data-public-page-degraded={eligibleTags === undefined ? true : undefined}>
     <InteriorHeader />
     <JsonLd data={structuredData} />
     <DigestTemplate
-      content={content}
+      content={publicContent}
       stories={digest.generation_metadata.digest_source_stories ?? []}
       storyId={digest.id}
       periodEnd={digest.digest_period_end}

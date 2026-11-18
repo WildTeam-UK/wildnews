@@ -111,11 +111,15 @@ export function publicArticleTagLinks<T extends { href: string }>(links: T[], el
   });
 }
 
+export async function getPublicTagLinkSlugs(links: { href: string }[]): Promise<Set<string>> {
+  const slugs = [...new Set(links.flatMap((link) => publicTagSlug(link.href) ?? []))];
+  const available = await Promise.all(slugs.map((slug) => hasPublicTagArchive(slug)));
+  return new Set(slugs.filter((_, index) => available[index]));
+}
+
 export async function getPublicArticleTags(story: PublishedStory & { story_contextual_links?: { href: string }[] }) {
   const tags = publishedTags(story).slice(0, 3);
-  const slugs = [...new Set([...tags.map((tag) => tag.slug), ...(story.story_contextual_links ?? []).flatMap((link) => publicTagSlug(link.href) ?? [])])];
-  const available = await Promise.all(slugs.map((slug) => hasPublicTagArchive(slug)));
-  const eligibleSlugs = new Set(slugs.filter((_, index) => available[index]));
+  const eligibleSlugs = await getPublicTagLinkSlugs([...tags.map((tag) => ({ href: `/tags/${tag.slug}` })), ...(story.story_contextual_links ?? [])]);
   return { discoveryTags: tags.filter((tag) => eligibleSlugs.has(tag.slug)), eligibleSlugs };
 }
 

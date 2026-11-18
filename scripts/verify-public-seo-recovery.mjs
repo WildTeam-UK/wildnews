@@ -121,6 +121,12 @@ for (const slug of ['hazel-dormouse-numbers-show-a-small-recent-rise-after-long-
   for (const match of body.matchAll(/<a[^>]*href="(?:https:\/\/news\.wildteam\.org\.uk)?\/tags\/([a-z0-9-]+)/g)) assert.ok(tagCounts.get(match[1])?.size >= 20, `Link to withheld tag ${match[1]}`);
   assert.match(body, /"@type":"NewsArticle"/);
 }
+for (const path of ['/daily-digest/2026-10-17', '/daily-digest/2026-10-18']) {
+  const { response, body } = await request(path);
+  assert.equal(response.status, 200);
+  assert.equal(headCanonical(body), `https://news.wildteam.org.uk${path}`);
+  for (const match of body.matchAll(/<a[^>]*href="(?:https:\/\/news\.wildteam\.org\.uk)?\/tags\/([a-z0-9-]+)/g)) assert.ok(tagCounts.get(match[1])?.size >= 20, `Digest links to withheld tag ${match[1]}`);
+}
 
 outage = true;
 for (const path of ['/topics/wildlife?page=2', '/tags/indigenous-peoples-and-local-communities?page=2', '/stories/global-fungal-conservation-strategy-launched-at-cop17?recovery-test=outage']) {
