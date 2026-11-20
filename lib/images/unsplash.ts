@@ -1,5 +1,7 @@
 import type { UnsplashImageCandidate } from './types';
 import { environmentValue } from '@/lib/environment';
+import { reviewEditorialImage } from './image-safety';
+import { imageWeaponReason } from './image-policy';
 
 const API_URL = 'https://api.unsplash.com';
 const REQUEST_TIMEOUT_MS = 10_000;
@@ -73,7 +75,7 @@ export async function searchUnsplashImages(query: string, limit = 6): Promise<Un
   url.searchParams.set('query', query.trim());
   url.searchParams.set('orientation', 'landscape');
   url.searchParams.set('content_filter', 'high');
-  url.searchParams.set('per_page', String(Math.max(1, Math.min(12, limit))));
+  url.searchParams.set('per_page', String(Math.max(1, Math.min(12, limit * 3))));
   const response = await fetch(url, {
     headers: { Authorization: `Client-ID ${key}`, 'Accept-Version': 'v1' },
     cache: 'no-store',
@@ -84,7 +86,15 @@ export async function searchUnsplashImages(query: string, limit = 6): Promise<Un
     throw new Error(`Image search failed. ${detail}`);
   }
   const result = await response.json() as { results?: UnsplashPhoto[] };
-  return (result.results ?? []).map(toCandidate);
+  const safe: UnsplashImageCandidate[] = [];
+  const signal = AbortSignal.timeout(25_000);
+  for (const candidate of (result.results ?? []).map(toCandidate)) {
+    if (safe.length >= Math.max(1, Math.min(6, limit))) break;
+    if (imageWeaponReason([candidate.image_url, candidate.alt_text, candidate.description, candidate.credit.source_url])) continue;
+    const review = await reviewEditorialImage({ image_url: candidate.image_url, alt_text: candidate.alt_text, description: candidate.description, source_url: candidate.credit.source_url, subject: query }, signal);
+    if (review.status === 'approved') safe.push(candidate);
+  }
+  return safe;
 }
 
 export async function recordUnsplashSelection(downloadLocation: string) {

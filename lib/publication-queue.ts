@@ -1,6 +1,7 @@
 import type { StoryDraftContent } from '@/lib/openai/draft-story';
 import { stripSourceMarkers } from '@/lib/article-text';
 import { publicationChecks } from '@/lib/publishing';
+import { articleImages, ImageSafetyError, requireSafeEditorialImages } from '@/lib/images/image-safety';
 import { getSupabaseAdminClient } from '@/lib/supabase/admin';
 import { runTaxonomyGovernance } from '@/lib/taxonomy-governance';
 import { isSameLondonDay, londonDateTimeParts, londonLocalDateTimeToUtc } from '@/lib/london-time';
@@ -339,7 +340,7 @@ export async function publishClaimedQueueItem(queueId: string) {
 
   try {
     const [{ data: story, error: storyError }, { count: sourceCount, error: sourceError }] = await Promise.all([
-      supabase.from('stories').select('id, status, cluster_id, headline, published_at, generation_metadata').eq('id', queueItem.story_id).single(),
+      supabase.from('stories').select('id, status, cluster_id, headline, published_at, image_url, image_alt, generation_metadata').eq('id', queueItem.story_id).single(),
       supabase.from('story_sources').select('*', { count: 'exact', head: true }).eq('story_id', queueItem.story_id),
     ]);
     if (storyError || !story) throw storyError ?? new Error('Queued article was not found.');
@@ -366,6 +367,7 @@ export async function publishClaimedQueueItem(queueId: string) {
       return { action: 'held', storyId: story.id, headline: story.headline, reason: failed.join('; ') };
     }
 
+    await requireSafeEditorialImages(articleImages(story, content));
     const publishedAt = story.published_at ?? new Date().toISOString();
     const { data: published, error: publishError } = await supabase.from('stories').update({ status: 'published', published_at: publishedAt, reviewer_id: null }).eq('id', story.id).eq('status', 'draft').select('id').maybeSingle();
     if (publishError || !published) throw publishError ?? new Error('The draft changed before it could be published.');
@@ -382,6 +384,10 @@ export async function publishClaimedQueueItem(queueId: string) {
   } catch (error) {
     const detail = error instanceof Error ? error.message : 'Unknown automatic publication error.';
     const attempts = Number(queueItem.attempt_count ?? 1);
+    if (error instanceof ImageSafetyError) {
+      await supabase.from('publication_queue').update({ status: 'held', hold_reason: detail.slice(0, 1000), last_error: detail.slice(0, 1000), claimed_at: null, editor_approved_at: null, editor_approved_by: null }).eq('id', queueId);
+      return { action: 'held', storyId: queueItem.story_id, reason: detail };
+    }
     if (attempts >= 3) {
       await supabase.from('publication_queue').update({ status: 'held', hold_reason: 'Automatic publishing failed three times.', last_error: detail.slice(0, 1000), claimed_at: null }).eq('id', queueId);
     } else {

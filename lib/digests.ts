@@ -104,9 +104,11 @@ export async function hydrateDigestSourceStories(stories: DigestSourceStory[]) {
     const linkedTopics = topicLinks.flatMap((link) => Array.isArray(link.topics) ? link.topics.map((topic) => topic.name) : link.topics?.name ?? []);
     return {
       ...story,
-      image_url: story.image_url ?? row?.image_url ?? article.image_url ?? null,
-      image_alt: story.image_alt ?? row?.image_alt ?? article.image_alt ?? null,
-      image_credit: story.image_credit ?? article.image_credit ?? null,
+      // A correction to a published source also corrects its digest cards.
+      // Null current credits must not resurrect a rejected snapshot credit.
+      image_url: row ? row.image_url ?? article.image_url ?? null : story.image_url,
+      image_alt: row ? row.image_alt ?? article.image_alt ?? null : story.image_alt,
+      image_credit: row ? article.image_credit ?? null : story.image_credit,
       topics: story.topics?.length ? story.topics : linkedTopics,
     };
   });

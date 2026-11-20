@@ -7,6 +7,7 @@ import { normalizeEditorialTopics } from '@/lib/taxonomy';
 import { articleLinkRows } from '@/lib/article-linking';
 import { isUuid } from '@/lib/validation';
 import { articleBodyText } from '@/lib/article-structure';
+import { articleImages, ImageSafetyError, requireSafeEditorialImages } from '@/lib/images/image-safety';
 
 export const dynamic = 'force-dynamic';
 
@@ -30,6 +31,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
   try {
     const previousContent = metadata.article_content as Partial<StoryDraftContent> | undefined;
     const content = cleanDraftContent({ ...body.content, template_version: previousContent?.template_version === 3 ? 3 : 2, topics: normalizeEditorialTopics(body.content.topics ?? []) }, validSourceIds);
+    await requireSafeEditorialImages(articleImages({}, content));
     const selectedNewUnsplashImage = content.image_credit?.provider === 'unsplash' && content.image_credit.source_id !== previousContent?.image_credit?.source_id;
     const taxonomyReady = content.topics.length > 0;
     const currentClassification = (metadata.topic_classification ?? {}) as Record<string, unknown>;
@@ -88,6 +90,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
       return Response.json({ saved: true, queueWarning });
     }
   } catch (error) {
+    if (error instanceof ImageSafetyError) return Response.json({ error: error.message }, { status: 422 });
     return unexpectedErrorResponse('Draft save failed', error, 'The draft could not be saved.');
   }
 }

@@ -1,6 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { articleLinkRows } from '@/lib/article-linking';
 import { recordUnsplashSelection } from '@/lib/images/unsplash';
+import { articleImages, requireSafeEditorialImages } from '@/lib/images/image-safety';
 import type { StoryDraftContent } from '@/lib/openai/draft-story';
 import { generateEditorialRevision, revisionChangesPublicContent } from '@/lib/openai/generate-editorial-revision';
 import { generateRevisionSummary, type RevisionSummaryEvidence } from '@/lib/openai/generate-revision-summary';
@@ -170,6 +171,7 @@ export async function applyEditorialRevision(supabase: SupabaseClient, revisionI
   if (!revision) throw new Error('Editorial revision not found.');
   if (revision.status !== 'draft') throw new Error('This editorial revision has already been resolved.');
   const proposedContent = revision.proposed_content as StoryDraftContent;
+  await requireSafeEditorialImages(articleImages({}, proposedContent));
   const baseContent = revision.base_content as StoryDraftContent;
   const contentChanged = revisionChangesPublicContent(baseContent, proposedContent);
   const { data: revisionLinks, error: revisionLinksError } = await supabase.from('story_editorial_revision_updates').select('update_id').eq('revision_id', revisionId);

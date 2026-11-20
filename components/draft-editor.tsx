@@ -67,6 +67,7 @@ export function DraftEditor({
   const [saving, setSaving] = useState(false);
   const [recalculating, setRecalculating] = useState(false);
   const [searchingImages, setSearchingImages] = useState(false);
+  const [reviewingImage, setReviewingImage] = useState(false);
   const [imageCandidates, setImageCandidates] = useState<UnsplashImageCandidate[]>([]);
   const [imageMessage, setImageMessage] = useState('');
   const [message, setMessage] = useState('');
@@ -149,6 +150,20 @@ export function DraftEditor({
     }
   }
 
+  async function checkImage() {
+    setReviewingImage(true);
+    setImageMessage('');
+    try {
+      const response = await fetch('/api/admin/images/review', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ image_url: content.image_url, alt_text: content.image_alt, source_url: content.image_credit?.source_url, subject: content.headline }) });
+      const result = await response.json() as { review?: { status: string; reason: string }; error?: string };
+      setImageMessage(result.review ? `${result.review.status === 'approved' ? 'Image approved' : 'Image rejected'}: ${result.review.reason} Every save and publication checks the current image again.` : result.error ?? 'Image safety could not be verified.');
+    } catch {
+      setImageMessage('Image safety could not be verified. Choose another image or retry.');
+    } finally {
+      setReviewingImage(false);
+    }
+  }
+
   function selectImage(candidate: UnsplashImageCandidate) {
     setContent((current) => ({
       ...current,
@@ -214,7 +229,7 @@ export function DraftEditor({
       </section>
 
       <section className="draft-edit-section draft-image-section">
-        <div className="draft-section-heading"><div><h3>Featured image</h3><p className="draft-section-note">Unsplash images are automatically labelled as illustrative and credited to the photographer.</p></div>{content.image_url ? <button className="admin-secondary-button" type="button" onClick={() => setContent((current) => ({ ...current, image_url: '', image_alt: '', image_credit: null }))}><X /> Remove image</button> : null}</div>
+        <div className="draft-section-heading"><div><h3>Featured image</h3><p className="draft-section-note">Images must be relevant and contain no weapons of any kind. Unsplash images are labelled as illustrative and credited.</p></div>{content.image_url ? <><button className="admin-secondary-button" type="button" onClick={checkImage} disabled={reviewingImage}>{reviewingImage ? <LoaderCircle className="admin-spinner" /> : <ShieldCheck />} Check image</button><button className="admin-secondary-button" type="button" onClick={() => setContent((current) => ({ ...current, image_url: '', image_alt: '', image_credit: null }))}><X /> Remove image</button></> : null}</div>
         {content.image_url ? <div className="draft-selected-image">{/* oxlint-disable-next-line next/no-img-element */}<img src={content.image_url} alt={content.image_alt} /><div><strong>{content.image_credit?.illustrative ? 'Illustrative image' : 'Featured image'}</strong>{content.image_credit ? <p>Photo by {content.image_credit.creator_name || 'Unknown creator'}{content.image_credit.source_name ? ` on ${content.image_credit.source_name}` : ''} · {content.image_credit.licence_name || 'Licence details required'}</p> : <p>Manual image — check that attribution and reuse permission are recorded below.</p>}</div></div> : <div className="draft-image-empty"><ImageIcon /><div><strong>No featured image selected</strong><p>Search Unsplash to add a free, credited illustrative image.</p></div></div>}
         <div className="draft-image-search"><label><span>Unsplash search</span><input value={content.image_search_query} onChange={(event) => setContent({ ...content, image_search_query: event.target.value })} maxLength={120} placeholder="For example: white rhinoceros grassland" /></label><button className="admin-secondary-button" type="button" onClick={searchImages} disabled={searchingImages}>{searchingImages ? <><LoaderCircle className="admin-spinner" /> Searching</> : <><Search /> Find images</>}</button></div>
         {imageMessage ? <p className="draft-image-message">{imageMessage}</p> : null}

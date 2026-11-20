@@ -4,6 +4,7 @@ import type { StoryDraftContent } from '@/lib/openai/draft-story';
 import { publicationChecks } from '@/lib/publishing';
 import { runTaxonomyGovernance } from '@/lib/taxonomy-governance';
 import { isUuid } from '@/lib/validation';
+import { articleImages, requireSafeEditorialImages } from '@/lib/images/image-safety';
 
 export const dynamic = 'force-dynamic';
 export async function POST(_: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -14,7 +15,7 @@ export async function POST(_: Request, { params }: { params: Promise<{ id: strin
   const { user } = auth;
   const supabase = getSupabaseAdminClient();
   const [{ data: story, error: storyError }, { count: sourceCount, error: sourcesError }] = await Promise.all([
-    supabase.from('stories').select('id, status, published_at, generation_metadata, taxonomy_review_required, taxonomy_review_reason').eq('id', id).single(),
+    supabase.from('stories').select('id, status, published_at, image_url, image_alt, generation_metadata, taxonomy_review_required, taxonomy_review_reason').eq('id', id).single(),
     supabase.from('story_sources').select('*', { count: 'exact', head: true }).eq('story_id', id),
   ]);
   if (storyError || !story) return Response.json({ error: 'Draft not found.' }, { status: 404 });
@@ -25,6 +26,11 @@ export async function POST(_: Request, { params }: { params: Promise<{ id: strin
   if (!content) return Response.json({ error: 'The article content could not be verified.' }, { status: 422 });
   const failed = publicationChecks(content, sourceCount ?? 0).filter((check) => !check.passed);
   if (failed.length) return Response.json({ error: `Complete these checks before publishing: ${failed.map((check) => check.label).join('; ')}.` }, { status: 422 });
+  try {
+    await requireSafeEditorialImages(articleImages(story, content));
+  } catch {
+    return Response.json({ error: 'The featured image could not pass the weapon-free image review. Choose another image or retry its review.' }, { status: 422 });
+  }
   const publishedAt = story.published_at ?? new Date().toISOString();
   const { error: updateError } = await supabase.from('stories').update({ status: 'published', published_at: publishedAt, reviewer_id: user.id }).eq('id', id).eq('status', 'draft');
   if (updateError) return Response.json({ error: 'The article could not be published.' }, { status: 500 });

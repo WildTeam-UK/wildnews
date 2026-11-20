@@ -6,6 +6,7 @@ import { revisionChangesPublicContent } from '@/lib/openai/generate-editorial-re
 import { requireApiAdmin } from '@/lib/supabase/require-api-admin';
 import { normalizeEditorialTopics } from '@/lib/taxonomy';
 import { isUuid } from '@/lib/validation';
+import { articleImages, ImageSafetyError, requireSafeEditorialImages } from '@/lib/images/image-safety';
 
 export const dynamic = 'force-dynamic';
 
@@ -32,10 +33,12 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     const validSourceIds = new Set(((revision.source_list ?? []) as StoredSource[]).flatMap((source) => source.id ? [source.id] : []));
     const baseContent = revision.base_content as StoryDraftContent;
     const content = cleanDraftContent({ ...body.content, template_version: baseContent.template_version === 3 ? 3 : 2, topics: normalizeEditorialTopics(body.content.topics ?? []) }, validSourceIds);
+    await requireSafeEditorialImages(articleImages({}, content));
     const { error } = await supabase.from('story_editorial_revisions').update({ proposed_content: content, public_content_changed: revisionChangesPublicContent(baseContent, content) }).eq('id', id).eq('status', 'draft');
     if (error) throw error;
     return Response.json({ saved: true });
   } catch (error) {
+    if (error instanceof ImageSafetyError) return Response.json({ error: error.message }, { status: 422 });
     return unexpectedErrorResponse('Editorial revision save failed', error, 'The editorial revision could not be saved.');
   }
 }
@@ -49,6 +52,7 @@ export async function POST(_request: Request, { params }: { params: Promise<{ id
   try {
     return Response.json(await applyEditorialRevision(supabase, id));
   } catch (error) {
+    if (error instanceof ImageSafetyError) return Response.json({ error: error.message }, { status: 422 });
     return unexpectedErrorResponse('Editorial revision apply failed', error, 'The revision was not applied. Its public update summary can be generated again when you retry.');
   }
 }

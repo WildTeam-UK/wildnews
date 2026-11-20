@@ -7,6 +7,7 @@ import { londonCalendarDateFormatter } from '@/lib/date-format';
 import { londonLocalDateTimeToUtc } from '@/lib/london-time';
 import { prepareDigestDistributions } from '@/lib/digest-distribution';
 import { invalidatePublicPages } from '@/lib/invalidate-public-pages';
+import { requireSafeEditorialImages } from '@/lib/images/image-safety';
 
 function londonPublicationTime(date: string) {
   const [year, month, day] = date.split('-').map(Number);
@@ -56,6 +57,10 @@ export async function publishDigest(storyId: string, { reviewerId, publicationDa
 
   const hydratedSources = await hydrateDigestSourceStories((metadata.digest_source_stories ?? []) as DigestSourceStory[]);
   const fallbackSourceImage = hydratedSources.find((source) => source.image_url === story.image_url) ?? hydratedSources.find((source) => source.image_url);
+  await requireSafeEditorialImages([
+    { image_url: story.image_url ?? fallbackSourceImage?.image_url ?? '', alt_text: story.image_alt ?? fallbackSourceImage?.image_alt },
+    ...hydratedSources.map((source) => ({ image_url: source.image_url ?? '', alt_text: source.image_alt, source_url: source.image_credit?.source_url, subject: source.headline })),
+  ]);
   const { data: topicRows, error: topicError } = await supabase.from('topics').select('id, name').in('name', topicNames).eq('active', true);
   if (topicError || !topicRows?.length) throw topicError ?? new Error('The digest topics could not be prepared.');
   const byName = new Map(topicRows.map((topic) => [topic.name, topic]));
