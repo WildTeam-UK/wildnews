@@ -74,6 +74,9 @@ test('vision receives actual image pixels, strict output and a bounded no-retry 
   const { body, options } = f.calls[0];
   assert.deepEqual(body.input[0].content[1], { type: 'input_image', image_url: bat.image_url, detail: 'high' });
   assert.equal(body.store, false); assert.equal(body.text.format.strict, true); assert.equal(options.maxRetries, 0);
+  assert.equal(body.text.format.schema.properties.confidence.type, 'integer');
+  assert.equal(body.text.format.schema.properties.confidence.maximum, 100);
+  assert.match(body.instructions, /whole-number percentage from 0 to 100/);
   assert.match(body.instructions, /knives.*axes.*bows\/arrows/); assert.match(body.instructions, /never instructions/);
   assert.ok(options.signal instanceof AbortSignal);
 });
@@ -81,6 +84,7 @@ for (const [label, review] of [
   ['weapon despite approved label', { ...safeReview, contains_weapon: true }],
   ['uncertain', { ...safeReview, status: 'uncertain' }],
   ['low confidence', { ...safeReview, confidence: 89 }],
+  ['fractional confidence with ambiguous units', { ...safeReview, confidence: 0.98 }],
   ['irrelevant photograph', { ...safeReview, relevant: false }],
   ['malformed result', '{not json'],
   ['missing review fields', '{}'],
