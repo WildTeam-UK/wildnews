@@ -1,6 +1,7 @@
 import { getSupabaseAdminClient } from '@/lib/supabase/admin';
 import { getPublishedStories } from '@/lib/published-stories';
-import { getPublicCacheStore } from '@/lib/public-cache-store';
+import { getPublicCacheStore, checkPublicCache } from '@/lib/public-cache-store';
+import { withPublicCacheDeadline } from '@/lib/public-page-cache';
 
 export const dynamic = 'force-dynamic';
 
@@ -37,12 +38,13 @@ const responseHeaders = {
 export async function GET() {
   try {
     const supabase = getSupabaseAdminClient();
-    const [editorialResult, digestResult, distributionResult, publicStories, publicPageFailure] = await Promise.all([
+    const [editorialResult, digestResult, distributionResult, publicStories, publicPageFailure, publicCacheHealthy] = await Promise.all([
       supabase.from('editorial_run_settings').select('automation_enabled, auto_publish_enabled, last_automation_tick_at, last_automation_error, consecutive_automation_failures').eq('id', true).single(),
       supabase.from('digest_settings').select('automation_enabled, social_distribution_enabled, email_distribution_enabled, last_automation_tick_at, last_automation_error, consecutive_automation_failures').eq('id', true).single(),
       supabase.from('digest_deliveries').select('provider, status').in('status', ['failed', 'uncertain']).limit(100),
       getPublishedStories(1),
-      Promise.all([getPublicCacheStore().get('render-failure'), getPublicCacheStore().get('invalidation-failure')]).then((failures) => failures.some(Boolean)),
+      Promise.all([withPublicCacheDeadline(getPublicCacheStore().get('render-failure')), withPublicCacheDeadline(getPublicCacheStore().get('invalidation-failure'))]).then((failures) => failures.some(Boolean)).catch(() => null),
+      checkPublicCache(),
     ]);
 
     if (editorialResult.error || digestResult.error || distributionResult.error) throw editorialResult.error ?? digestResult.error ?? distributionResult.error;
@@ -58,14 +60,15 @@ export async function GET() {
     const distributionFailing = distributionEnabled && (distributionResult.data ?? []).some((delivery) =>
       delivery.provider === 'buffer' ? digest.social_distribution_enabled : digest.email_distribution_enabled
     );
-    const publicPagesFailing = !publicStories.length || Boolean(publicPageFailure);
-    const ok = !heartbeatStale && !editorialFailing && !digestFailing && !distributionFailing && !publicPagesFailing;
+    const publicPagesFailing = !publicStories.length || publicPageFailure !== false;
+    const ok = publicCacheHealthy && !heartbeatStale && !editorialFailing && !digestFailing && !distributionFailing && !publicPagesFailing;
 
     return Response.json({
       ok,
       checks: {
         database: 'healthy',
-        public_pages: publicPagesFailing ? 'failing' : 'healthy',
+        public_pages: publicPageFailure === null ? 'unknown' : publicPagesFailing ? 'failing' : 'healthy',
+        public_cache: publicCacheHealthy ? 'healthy' : 'unavailable',
         scheduler: heartbeatRequired ? heartbeatStale ? 'stale' : 'healthy' : 'idle',
         editorial: editorialEnabled ? editorialFailing ? 'failing' : 'healthy' : 'disabled',
         publishing: editorial.auto_publish_enabled ? 'healthy' : 'disabled',

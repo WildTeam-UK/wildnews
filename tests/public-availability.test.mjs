@@ -11,8 +11,8 @@ after(() => rm(directory, { recursive: true, force: true }));
 const mocks = {
   nitro: 'export const definePlugin = f => f; export const defineMiddleware = f => f;',
   '@vercel/functions': 'export const waitUntil = p => globalThis.availabilityFixture.jobs.push(p);',
-  '../lib/public-cache-store': 'export const getPublicCacheStore = () => globalThis.availabilityFixture.store;',
-  '../lib/invalidate-public-pages': 'export const invalidatePublicPages = async () => { globalThis.availabilityFixture.invalidated++; };',
+  '../lib/public-cache-store': 'export const getPublicCacheStore = () => globalThis.availabilityFixture.store; export const getPublicCacheDeployment = () => "fixture";',
+  '../lib/invalidate-public-pages': 'let listener; export const onPublicPageInvalidation = f => { listener = f; return () => {}; }; export const invalidatePublicPages = async () => { listener(); globalThis.availabilityFixture.invalidated++; };',
   '../lib/operational-log': 'export const operationalLog = () => {};',
 };
 const compiled = await build({ entryPoints: ['server/public-availability.ts'], bundle: true, write: false, platform: 'node', format: 'esm', plugins: [{ name: 'availability-fixture', setup(builder) {
@@ -32,7 +32,7 @@ function fixture({ cacheFails = false } = {}) {
   } };
   globalThis.availabilityFixture = f;
   let middleware;
-  const nitro = { h3: { '~middleware': { push: (fn) => { middleware = fn; } } }, fetch: (request) => middleware({ req: request, url: new URL(request.url) }, async () => {
+  const nitro = { hooks: { hook: () => {} }, h3: { '~middleware': { push: (fn) => { middleware = fn; } } }, fetch: (request) => middleware({ req: request, url: new URL(request.url) }, async () => {
     f.renders.push(request);
     return new Response(request.method === 'HEAD' ? null : f.body, { status: f.status, headers: { 'content-type': f.type, ...f.headers } });
   }) };
