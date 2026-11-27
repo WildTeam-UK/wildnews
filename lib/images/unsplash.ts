@@ -68,7 +68,7 @@ export function unsplashIsConfigured() {
   return Boolean(accessKey());
 }
 
-export async function searchUnsplashImages(query: string, limit = 6): Promise<UnsplashImageCandidate[]> {
+export async function searchUnsplashImages(query: string, limit = 6, options: { signal?: AbortSignal; excludedUrls?: Set<string>; excludedSourceIds?: Set<string>; subject?: string } = {}): Promise<UnsplashImageCandidate[]> {
   const key = accessKey();
   if (!key) throw new Error('Unsplash has not been connected yet.');
   const url = new URL(`${API_URL}/search/photos`);
@@ -79,7 +79,7 @@ export async function searchUnsplashImages(query: string, limit = 6): Promise<Un
   const response = await fetch(url, {
     headers: { Authorization: `Client-ID ${key}`, 'Accept-Version': 'v1' },
     cache: 'no-store',
-    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    signal: options.signal ? AbortSignal.any([options.signal, AbortSignal.timeout(REQUEST_TIMEOUT_MS)]) : AbortSignal.timeout(REQUEST_TIMEOUT_MS),
   });
   if (!response.ok) {
     const detail = response.status === 401 ? 'Check the Unsplash access key.' : `Unsplash returned ${response.status}.`;
@@ -87,17 +87,21 @@ export async function searchUnsplashImages(query: string, limit = 6): Promise<Un
   }
   const result = await response.json() as { results?: UnsplashPhoto[] };
   const safe: UnsplashImageCandidate[] = [];
-  const signal = AbortSignal.timeout(25_000);
+  const signal = options.signal ? AbortSignal.any([options.signal, AbortSignal.timeout(25_000)]) : AbortSignal.timeout(25_000);
   for (const candidate of (result.results ?? []).map(toCandidate)) {
+    if (signal.aborted) break;
     if (safe.length >= Math.max(1, Math.min(6, limit))) break;
+    if (options.excludedUrls?.has(candidate.image_url) || options.excludedSourceIds?.has(candidate.credit.source_id)) continue;
     if (imageWeaponReason([candidate.image_url, candidate.alt_text, candidate.description, candidate.credit.source_url])) continue;
-    const review = await reviewEditorialImage({ image_url: candidate.image_url, alt_text: candidate.alt_text, description: candidate.description, source_url: candidate.credit.source_url, subject: query }, signal);
-    if (review.status === 'approved') safe.push(candidate);
+    try {
+      const review = await reviewEditorialImage({ image_url: candidate.image_url, alt_text: candidate.alt_text, description: candidate.description, source_url: candidate.credit.source_url, subject: options.subject ?? query }, signal);
+      if (review.status === 'approved') safe.push(candidate);
+    } catch { /* A bad or unreadable candidate must not stop the remaining search. */ }
   }
   return safe;
 }
 
-export async function recordUnsplashSelection(downloadLocation: string) {
+export async function recordUnsplashSelection(downloadLocation: string, signal?: AbortSignal) {
   const key = accessKey();
   if (!key || !downloadLocation) return;
   const url = new URL(downloadLocation);
@@ -105,7 +109,7 @@ export async function recordUnsplashSelection(downloadLocation: string) {
   const response = await fetch(url, {
     headers: { Authorization: `Client-ID ${key}`, 'Accept-Version': 'v1' },
     cache: 'no-store',
-    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(REQUEST_TIMEOUT_MS)]) : AbortSignal.timeout(REQUEST_TIMEOUT_MS),
   });
   if (!response.ok) console.warn(`Unsplash selection tracking returned ${response.status}.`);
 }

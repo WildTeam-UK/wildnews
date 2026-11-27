@@ -49,6 +49,8 @@ export type DigestSourceStory = {
   image_url: string | null;
   image_alt: string | null;
   image_credit?: EditorialImageCredit | null;
+  // A digest-only safe replacement remains while its source image is unchanged.
+  image_override_for?: string | null;
   topics?: string[];
   published_at: string;
 };
@@ -102,13 +104,16 @@ export async function hydrateDigestSourceStories(stories: DigestSourceStory[]) {
     const article = metadata.article_content ?? {};
     const topicLinks = (row?.story_topics ?? []) as unknown as Array<{ topics: { name: string } | { name: string }[] | null }>;
     const linkedTopics = topicLinks.flatMap((link) => Array.isArray(link.topics) ? link.topics.map((topic) => topic.name) : link.topics?.name ?? []);
+    const currentUrl = row ? row.image_url ?? article.image_url ?? null : story.image_url;
+    const keepReplacement = Object.hasOwn(story, 'image_override_for') && (!row || currentUrl === story.image_override_for);
     return {
       ...story,
       // A correction to a published source also corrects its digest cards.
       // Null current credits must not resurrect a rejected snapshot credit.
-      image_url: row ? row.image_url ?? article.image_url ?? null : story.image_url,
-      image_alt: row ? row.image_alt ?? article.image_alt ?? null : story.image_alt,
-      image_credit: row ? article.image_credit ?? null : story.image_credit,
+      image_url: keepReplacement ? story.image_url : currentUrl,
+      image_alt: keepReplacement ? story.image_alt : row ? row.image_alt ?? article.image_alt ?? null : story.image_alt,
+      image_credit: keepReplacement ? story.image_credit : row ? article.image_credit ?? null : story.image_credit,
+      ...(keepReplacement ? {} : { image_override_for: undefined }),
       topics: story.topics?.length ? story.topics : linkedTopics,
     };
   });

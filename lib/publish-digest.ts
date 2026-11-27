@@ -8,6 +8,7 @@ import { londonLocalDateTimeToUtc } from '@/lib/london-time';
 import { prepareDigestDistributions } from '@/lib/digest-distribution';
 import { invalidatePublicPages } from '@/lib/invalidate-public-pages';
 import { requireSafeEditorialImages } from '@/lib/images/image-safety';
+import { chooseSafePublicationImage } from '@/lib/images/publication-images';
 
 function londonPublicationTime(date: string) {
   const [year, month, day] = date.split('-').map(Number);
@@ -56,10 +57,25 @@ export async function publishDigest(storyId: string, { reviewerId, publicationDa
   content.topics = topicNames;
 
   const hydratedSources = await hydrateDigestSourceStories((metadata.digest_source_stories ?? []) as DigestSourceStory[]);
-  const fallbackSourceImage = hydratedSources.find((source) => source.image_url === story.image_url) ?? hydratedSources.find((source) => source.image_url);
+  const imageSignal = AbortSignal.timeout(25_000);
+  const heroSubject = content.image_search_query || content.headline;
+  const hero = await chooseSafePublicationImage([
+    { image_url: story.image_url ?? '', image_alt: story.image_alt ?? '', image_credit: content.image_credit ?? null },
+  ], [content.image_search_query ?? '', ...(content.image_search_fallbacks ?? []), content.headline], heroSubject, { signal: imageSignal });
+  content.image_credit = hero.image_credit;
+  if (hero.query) content.image_search_query = hero.query;
+  const publicationSources: DigestSourceStory[] = [];
+  for (const source of hydratedSources) {
+    const selected = await chooseSafePublicationImage([
+      { image_url: source.image_url ?? '', image_alt: source.image_alt ?? '', image_credit: source.image_credit ?? null },
+    ], [source.headline], source.headline, { signal: imageSignal });
+    publicationSources.push({ ...source, image_url: selected.image_url, image_alt: selected.image_alt, image_credit: selected.image_credit,
+      ...(selected.image_url !== source.image_url ? { image_override_for: source.image_url ?? null } : {}),
+    });
+  }
   await requireSafeEditorialImages([
-    { image_url: story.image_url ?? fallbackSourceImage?.image_url ?? '', alt_text: story.image_alt ?? fallbackSourceImage?.image_alt },
-    ...hydratedSources.map((source) => ({ image_url: source.image_url ?? '', alt_text: source.image_alt, source_url: source.image_credit?.source_url, subject: source.headline })),
+    { image_url: hero.image_url, alt_text: hero.image_alt, source_url: hero.image_credit?.source_url, subject: heroSubject },
+    ...publicationSources.map((source) => ({ image_url: source.image_url ?? '', alt_text: source.image_alt, source_url: source.image_credit?.source_url, subject: source.headline })),
   ]);
   const { data: topicRows, error: topicError } = await supabase.from('topics').select('id, name').in('name', topicNames).eq('active', true);
   if (topicError || !topicRows?.length) throw topicError ?? new Error('The digest topics could not be prepared.');
@@ -73,10 +89,8 @@ export async function publishDigest(storyId: string, { reviewerId, publicationDa
 
   const actionAt = new Date().toISOString();
   const publishedAt = publicationDate ? londonPublicationTime(publicationDate).toISOString() : actionAt;
-  const publicationImageUrl = story.image_url ?? fallbackSourceImage?.image_url ?? null;
-  const publicationImageAlt = story.image_alt ?? fallbackSourceImage?.image_alt ?? null;
   const { data: updated, error: updateError } = await supabase.from('stories')
-    .update({ status: 'published', published_at: publishedAt, reviewer_id: reviewerId, primary_topic_id: selectedTopics[0].id, image_url: publicationImageUrl, image_alt: publicationImageAlt, generation_metadata: { ...metadata, digest_content: content, digest_source_stories: hydratedSources } })
+    .update({ status: 'published', published_at: publishedAt, reviewer_id: reviewerId, primary_topic_id: selectedTopics[0].id, image_url: hero.image_url, image_alt: hero.image_alt, generation_metadata: { ...metadata, digest_content: content, digest_source_stories: publicationSources } })
     .eq('id', storyId)
     .eq('status', 'draft')
     .select('id')

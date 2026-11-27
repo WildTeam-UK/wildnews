@@ -5,8 +5,7 @@ import { aiInstructions, parseAiJson } from './house-style';
 import { isCalendarDate } from '@/lib/validation';
 import { getSupabaseAdminClient } from '@/lib/supabase/admin';
 import { EDITORIAL_TOPICS, normalizeEditorialTopics } from '@/lib/taxonomy';
-import { recordUnsplashSelection, searchUnsplashImages, unsplashIsConfigured } from '@/lib/images/unsplash';
-import type { UnsplashImageCandidate } from '@/lib/images/types';
+import { chooseSafePublicationImage } from '@/lib/images/publication-images';
 import { londonCalendarDateFormatter, londonLongDateFormatter } from '@/lib/date-format';
 import { londonLocalDateTimeToUtc } from '@/lib/london-time';
 import { assessStoryContextualLinks } from '@/lib/openai/assess-contextual-links';
@@ -163,16 +162,6 @@ function cleanGeneratedDigestText(value: string) {
 
 function imageCredit(source: DigestSourceStory & { generation_metadata: SourceMetadata }) {
   return source.generation_metadata?.article_content?.image_credit ?? null;
-}
-
-async function selectDigestImage(queries: string[], excludedSourceIds: Set<string>, excludedUrls: Set<string>) {
-  if (!unsplashIsConfigured()) throw new Error('Unsplash must be connected before a digest can select its dedicated featured image.');
-  for (const query of queries) {
-    const candidates = await searchUnsplashImages(query, 6);
-    const candidate = candidates.find((image) => !excludedSourceIds.has(image.credit.source_id) && !excludedUrls.has(image.image_url));
-    if (candidate) return { image: candidate, query };
-  }
-  throw new Error('No suitable dedicated digest image was found. Try broader digest image search terms.');
 }
 
 export async function generateDigest(type: DigestType, userId: string | null, options: GenerateDigestOptions = {}) {
@@ -350,18 +339,10 @@ This is a private editorial draft for review. Return only the requested structur
         return metadata?.digest_content?.image_credit?.source_id ?? [];
       }),
     ]);
-    let selectedImage: UnsplashImageCandidate;
-    let selectedImageQuery: string;
-    try {
-      const selected = await selectDigestImage(imageQueries, excludedSourceIds, excludedUrls);
-      selectedImage = selected.image;
-      selectedImageQuery = selected.query;
-      await recordUnsplashSelection(selectedImage.credit.download_location);
-    } catch (error) {
-      throw new Error(error instanceof Error ? `Dedicated digest image selection failed: ${error.message}` : 'Dedicated digest image selection failed.');
-    }
+    const selectedImage = await chooseSafePublicationImage([], imageQueries, generated.image_search_query, { excludedSourceIds, excludedUrls });
+    const selectedImageQuery = selectedImage.query ?? imageQueries[0];
     content.image_search_query = selectedImageQuery;
-    content.image_credit = selectedImage.credit;
+    content.image_credit = selectedImage.image_credit;
     const { data: topicRows, error: topicsError } = await supabase.from('topics').select('id, name').in('name', content.topics).eq('active', true);
     if (topicsError) throw topicsError;
     const topicsByName = new Map((topicRows ?? []).map((topic) => [topic.name, topic]));
@@ -379,7 +360,7 @@ This is a private editorial draft for review. Return only the requested structur
       body: content.sections.map((section) => `${section.heading}\n${section.paragraphs.join('\n\n')}`).join('\n\n'),
       key_takeaways: content.what_to_watch,
       image_url: selectedImage.image_url,
-      image_alt: selectedImage.alt_text || `Illustrative image related to ${selectedImageQuery}`,
+      image_alt: selectedImage.image_alt,
       primary_topic_id: selectedTopics[0].id,
       reviewer_id: userId,
       published_at: null,

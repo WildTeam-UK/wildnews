@@ -2,6 +2,7 @@ import type { StoryDraftContent } from '@/lib/openai/draft-story';
 import { stripSourceMarkers } from '@/lib/article-text';
 import { publicationChecks } from '@/lib/publishing';
 import { articleImages, ImageSafetyError, requireSafeEditorialImages } from '@/lib/images/image-safety';
+import { chooseSafePublicationImage } from '@/lib/images/publication-images';
 import { getSupabaseAdminClient } from '@/lib/supabase/admin';
 import { runTaxonomyGovernance } from '@/lib/taxonomy-governance';
 import { isSameLondonDay, londonDateTimeParts, londonLocalDateTimeToUtc } from '@/lib/london-time';
@@ -367,9 +368,14 @@ export async function publishClaimedQueueItem(queueId: string) {
       return { action: 'held', storyId: story.id, headline: story.headline, reason: failed.join('; ') };
     }
 
-    await requireSafeEditorialImages(articleImages(story, content));
+    const selectedImage = await chooseSafePublicationImage([
+      { image_url: story.image_url ?? '', image_alt: story.image_alt ?? '', image_credit: content.image_credit },
+      { image_url: content.image_url, image_alt: content.image_alt, image_credit: content.image_credit },
+    ], [content.image_search_query ?? '', ...(content.image_search_fallbacks ?? []), content.headline], content.headline);
+    const publicationContent = { ...content, image_url: selectedImage.image_url, image_alt: selectedImage.image_alt, image_credit: selectedImage.image_credit, image_search_query: selectedImage.query ?? content.image_search_query };
+    await requireSafeEditorialImages(articleImages(selectedImage, publicationContent));
     const publishedAt = story.published_at ?? new Date().toISOString();
-    const { data: published, error: publishError } = await supabase.from('stories').update({ status: 'published', published_at: publishedAt, reviewer_id: null }).eq('id', story.id).eq('status', 'draft').select('id').maybeSingle();
+    const { data: published, error: publishError } = await supabase.from('stories').update({ status: 'published', published_at: publishedAt, reviewer_id: null, image_url: selectedImage.image_url, image_alt: selectedImage.image_alt, generation_metadata: { ...story.generation_metadata, article_content: publicationContent } }).eq('id', story.id).eq('status', 'draft').select('id').maybeSingle();
     if (publishError || !published) throw publishError ?? new Error('The draft changed before it could be published.');
     await invalidatePublicPages();
     const { error: queueUpdateError } = await supabase.from('publication_queue').update({ status: 'published', published_at: publishedAt, claimed_at: null, hold_reason: null, last_error: null }).eq('id', queueId);

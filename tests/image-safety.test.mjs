@@ -18,6 +18,7 @@ const overrides = {
   '@/lib/invalidate-public-pages': 'export const invalidatePublicPages = async () => {};',
   '@/lib/taxonomy-governance': 'export const runTaxonomyGovernance = async () => {};',
   '@/lib/digest-distribution': 'export const prepareDigestDistributions = async () => { throw Error("Unexpected distribution"); };',
+  '@/lib/images/unsplash': 'export const unsplashIsConfigured = () => globalThis.imageFixture.unsplashEnabled ?? false; export const searchUnsplashImages = (...args) => globalThis.imageFixture.search(...args); export const recordUnsplashSelection = (...args) => globalThis.imageFixture.track?.(...args);',
 };
 async function load(entry, extra = {}) {
   const replacements = { ...overrides, ...extra };
@@ -142,18 +143,25 @@ test('manual publication blocks an unsafe row image even when the metadata image
   const response = await route.POST(new Request('https://news.example/publish'), { params: Promise.resolve({ id: storyId }) });
   assert.equal(response.status, 422); assert.equal(f.writes.length, 0); assert.equal(f.tables.stories[0].status, 'draft');
 });
-test('scheduled publication holds unsafe images even with editor approval', async () => {
+test('scheduled publication replaces an unsafe image with the safe placeholder even with editor approval', async () => {
   const f = publicationFixture(); f.tables.stories[0].generation_metadata.article_content = { ...content, image_alt: 'an assault rifle' };
   const queue = await load('lib/publication-queue.ts', { '@/lib/publishing': 'export const publicationChecks = () => [];', '@/lib/settings': 'export const getSettings = async () => ({});' });
   const result = await queue.publishClaimedQueueItem('queue');
-  assert.equal(result.action, 'held'); assert.equal(f.tables.stories[0].status, 'draft');
-  assert.ok(f.writes.every((write) => write.table === 'publication_queue'));
-  assert.equal(f.tables.publication_queue[0].editor_approved_at, null);
+  assert.equal(result.action, 'published'); assert.equal(f.tables.stories[0].status, 'published');
+  assert.equal(f.tables.stories[0].image_url, 'https://news.wildteam.org.uk/editorial-image-fallback.png');
+  assert.equal(f.tables.stories[0].generation_metadata.article_content.image_credit, null);
+  assert.equal(f.tables.stories[0].generation_metadata.article_content.image_url, f.tables.stories[0].image_url);
 });
-test('digest publication reviews source-card images before any database mutation', async () => {
+test('digest publication replaces unsafe source-card images and publishes without changing source articles', async () => {
   const f = publicationFixture(); f.tables.stories[0].generation_metadata.digest_source_stories = [{ id: 'source', image_url: 'https://images.unsplash.com/photo-1535253868107-da56da1693db', image_alt: 'nature', headline: 'Wildlife' }];
   const digest = await load('lib/publish-digest.ts');
-  await assert.rejects(digest.publishDigest(storyId, { reviewerId: 'editor' }), /rejected/); assert.equal(f.writes.length, 0);
+  await digest.publishDigest(storyId, { reviewerId: 'editor' });
+  assert.equal(f.tables.stories[0].status, 'published');
+  const source = f.tables.stories[0].generation_metadata.digest_source_stories[0];
+  assert.equal(source.image_url, 'https://news.wildteam.org.uk/editorial-image-fallback.png');
+  assert.equal(source.image_credit, null);
+  assert.equal(source.image_override_for, 'https://images.unsplash.com/photo-1535253868107-da56da1693db');
+  assert.equal(f.writes.filter(write => write.table === 'stories').length, 1);
 });
 test('draft saving rejects unsafe manual images before any data write', async () => {
   const f = publicationFixture(); const route = await load('app/api/admin/drafts/[id]/route.ts', { '@/lib/openai/draft-story': 'export const cleanDraftContent = (value) => value;', '@/lib/publication-queue': 'export const queueReadyDrafts = async () => ({});' });
@@ -187,4 +195,114 @@ test('private revision saves also reject unsafe manual replacements', async () =
   const route = await load('app/api/admin/story-revisions/[id]/route.ts', { '@/lib/openai/draft-story': 'export const cleanDraftContent = (value) => value;', '@/lib/coverage-revision-workflow': 'export const applyEditorialRevision = async () => {};', '@/lib/openai/generate-editorial-revision': 'export const revisionChangesPublicContent = () => true;' });
   const response = await route.PATCH(new Request('https://news.example/revision', { method: 'PATCH', body: JSON.stringify({ content: { ...content, image_alt: 'a knife' } }) }), { params: Promise.resolve({ id: storyId }) });
   assert.equal(response.status, 422); assert.equal(f.writes.length, 0);
+});
+
+const safePlaceholder = 'https://news.wildteam.org.uk/editorial-image-fallback.png';
+const photoImage = { image_url: bat.image_url, image_alt: bat.alt_text, image_credit: null };
+const replacementPhoto = { id: 'replacement', image_url: 'https://images.unsplash.com/safe-replacement.jpg', alt_text: 'Bats flying in a forest', credit: { provider: 'unsplash', source_id: 'replacement', source_url: 'https://unsplash.com/photos/replacement', download_location: 'https://api.unsplash.com/photos/replacement/download' } };
+
+test('a safe existing photograph is preserved without searching or tracking', async () => {
+  const f = fixture(); f.unsplashEnabled = true; f.search = () => { throw Error('Unexpected search'); };
+  const images = await load('lib/images/publication-images.ts');
+  assert.deepEqual(await images.chooseSafePublicationImage([photoImage], ['bats'], 'Bat conservation'), photoImage);
+  assert.equal(f.calls.length, 1); assert.equal(f.writes.length, 0);
+});
+
+test('a duplicate unsafe caption rejects the whole candidate before choosing a verified replacement', async () => {
+  const f = fixture(); f.unsplashEnabled = true;
+  const searches = [], downloads = [];
+  f.search = async (...args) => { searches.push(args); return [replacementPhoto]; };
+  f.track = async value => { downloads.push(value); };
+  const images = await load('lib/images/publication-images.ts');
+  const selected = await images.chooseSafePublicationImage([photoImage, { ...photoImage, image_alt: 'a handgun' }], ['bats'], 'Bat conservation');
+  assert.equal(selected.image_url, replacementPhoto.image_url);
+  assert.equal(searches[0][2].excludedUrls.has(bat.image_url), true);
+  assert.equal(searches[0][2].subject, 'Bat conservation');
+  assert.equal(f.calls.length, 1); assert.equal(f.calls[0].body.input[0].content[1].image_url, replacementPhoto.image_url);
+  assert.deepEqual(downloads, [replacementPhoto.credit.download_location]);
+});
+
+for (const [label, review] of [
+  ['weapon', { ...safeReview, contains_weapon: true }],
+  ['uncertain', { ...safeReview, status: 'uncertain' }],
+  ['irrelevant', { ...safeReview, relevant: false }],
+  ['malformed', '{bad json'],
+  ['provider unavailable', Error('Unavailable')],
+]) test(`automatic image recovery uses the safe illustration when review is ${typeof label === 'string' ? label : 'invalid'}`, async () => {
+  fixture(review);
+  const images = await load('lib/images/publication-images.ts');
+  const selected = await images.chooseSafePublicationImage([photoImage], ['bats'], 'Bats');
+  assert.equal(selected.image_url, safePlaceholder); assert.equal(selected.image_credit, null);
+});
+
+test('automatic image search tries broader terms after errors and never exceeds three distinct queries', async () => {
+  const f = fixture(); f.unsplashEnabled = true;
+  const searches = [];
+  f.search = async query => { searches.push(query); if (searches.length === 1) throw Error('Search unavailable'); return []; };
+  const images = await load('lib/images/publication-images.ts');
+  assert.equal((await images.chooseSafePublicationImage([], ['bat', 'bat', 'forest', 'habitat', 'extra'], 'Bats')).image_url, safePlaceholder);
+  assert.deepEqual(searches, ['bat', 'forest', 'habitat']);
+});
+
+test('expired shared image budget uses the safe illustration without model or search calls', async () => {
+  const f = fixture(); f.unsplashEnabled = true; f.search = () => { throw Error('Unexpected search'); };
+  const images = await load('lib/images/publication-images.ts');
+  const selected = await images.chooseSafePublicationImage([photoImage], ['bats'], 'Bats', { signal: AbortSignal.abort() });
+  assert.equal(selected.image_url, safePlaceholder); assert.equal(f.calls.length, 0);
+});
+
+test('download tracking failure does not discard a verified replacement', async () => {
+  const f = fixture(); f.unsplashEnabled = true; f.search = async () => [replacementPhoto]; f.track = async () => { throw Error('Tracking unavailable'); };
+  const images = await load('lib/images/publication-images.ts');
+  assert.equal((await images.chooseSafePublicationImage([], ['bats'], 'Bats')).image_url, replacementPhoto.image_url);
+});
+
+test('an unsafe featured digest image is replaced without stopping publication and a retry cannot republish it', async () => {
+  const f = publicationFixture({ ...safeReview, status: 'uncertain' });
+  const digest = await load('lib/publish-digest.ts');
+  await digest.publishDigest(storyId, { reviewerId: null, automated: true });
+  assert.equal(f.tables.stories[0].status, 'published');
+  assert.equal(f.tables.stories[0].image_url, safePlaceholder);
+  assert.equal(f.tables.stories[0].generation_metadata.digest_content.image_credit, null);
+  const writes = f.writes.length;
+  assert.equal((await digest.publishDigest(storyId, { reviewerId: null, automated: true })).alreadyPublished, true);
+  assert.equal(f.writes.length, writes);
+});
+
+test('a digest replacement survives hydration while the rejected source image remains unchanged', async () => {
+  const f = fixture();
+  const rejected = 'https://images.unsplash.com/rejected.jpg';
+  f.tables.stories = [{ id: 'source', image_url: rejected, image_alt: 'Old image', article_credit: { source_url: 'https://example.com/old-credit' } }];
+  const digests = await load('lib/digests.ts');
+  const snapshot = { id: 'source', image_url: safePlaceholder, image_alt: 'WildNews editorial illustration', image_credit: null, image_override_for: rejected };
+  const [retained] = await digests.hydrateDigestSourceStories([snapshot]);
+  assert.equal(retained.image_url, safePlaceholder); assert.equal(retained.image_credit, null);
+  f.tables.stories[0].image_url = bat.image_url; f.tables.stories[0].image_alt = bat.alt_text; f.tables.stories[0].article_credit = null;
+  const [corrected] = await digests.hydrateDigestSourceStories([snapshot]);
+  assert.equal(corrected.image_url, bat.image_url); assert.equal(corrected.image_override_for, undefined);
+});
+
+test('publication quality failures still hold copy before any image search or story update', async () => {
+  const f = publicationFixture(); f.unsplashEnabled = true; f.search = () => { throw Error('Unexpected image search'); };
+  const queue = await load('lib/publication-queue.ts', { '@/lib/publishing': 'export const publicationChecks = () => [{passed:false,label:"Missing evidence"}];' });
+  assert.equal((await queue.publishClaimedQueueItem('queue')).action, 'held');
+  assert.equal(f.tables.stories[0].status, 'draft');
+  assert.equal(f.calls.length, 0); assert.ok(f.writes.every(write => write.table === 'publication_queue'));
+});
+
+test('one unreadable Unsplash candidate cannot stop a later safe candidate', async () => {
+  const f = fixture();
+  f.model = async body => {
+    f.calls.push({ body });
+    if (body.input[0].content[1].image_url.includes('unreadable')) throw Error('Cannot download image');
+    return { output_text: JSON.stringify(safeReview) };
+  };
+  const unsplash = await load('lib/images/unsplash.ts', { '@/lib/environment': 'export const environmentValue = () => "fixture-key";' });
+  const originalFetch = globalThis.fetch;
+  const photo = id => ({ id, width: 2000, height: 1200, alt_description: 'Bats', description: 'Bats', urls: { raw: `https://images.unsplash.com/${id}` }, links: { html: `https://unsplash.com/photos/${id}`, download_location: `https://api.unsplash.com/photos/${id}/download` }, user: { name: 'Photographer', links: { html: 'https://unsplash.com/@photographer' } } });
+  globalThis.fetch = async () => Response.json({ results: [photo('excluded'), photo('unreadable'), photo('safe')] });
+  try {
+    const images = await unsplash.searchUnsplashImages('bats', 1, { excludedSourceIds: new Set(['excluded']) });
+    assert.equal(images[0].id, 'safe'); assert.equal(f.calls.length, 2);
+  } finally { globalThis.fetch = originalFetch; }
 });
